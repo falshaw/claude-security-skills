@@ -1,0 +1,47 @@
+# docker-audit configuration — copy to audit.config.yml and edit.
+# All values are examples. Never put secrets in this file.
+
+# Directories swept for compose files BY CONTENT (any *.yml/*.yaml containing `services:`).
+roots:
+  - apps/
+  - infra/
+  - shared/
+
+# Globs never audited (build artifacts, vendor samples, archived stacks).
+exclude:
+  - "**/node_modules/**"
+  - "**/.next/**"
+  - "**/vendor-samples/**"
+  - "archive/**"
+
+# Services allowed a restart policy other than "no" (local dev default).
+restart_exceptions:
+  - service: llm-gateway
+    policy: always
+    reason: shared infrastructure every app depends on
+  - service: example-app-db
+    policy: unless-stopped
+    reason: daily-use stack; owner wants it back after host restarts
+
+# Env vars allowed to use ${VAR:-default} (non-secret toggles only).
+bridge_toggle_vars:
+  - LLM_PROVIDER
+  - LLM_GATEWAY_URL
+  - LLM_MODEL
+
+# Owner-accepted risks — listed in the report, never re-flagged as findings.
+accepted_risks:
+  - id: gpu-service-root
+    match: "services.image-gen.user"
+    reason: GPU runtime needs root for host bind-mount ownership; cap_drop ALL + no-new-privileges + pids limit applied
+    reevaluate_when: the service is exposed beyond 127.0.0.1
+  - id: public-proxy-profile
+    match: "services.reverse-proxy.ports"
+    reason: profile-gated 0.0.0.0:80/443, never started locally
+    reevaluate_when: before any real public deploy
+
+# Previous report used for the baseline comparison (optional).
+previous_report: reports/2026-01-01-docker-security-audit.md
+
+# Where reports are written (keep it gitignored).
+report_dir: reports/

@@ -1,0 +1,47 @@
+# pii-leak-sweep patterns — EXAMPLE ONLY. Every term below is fictional.
+#
+#   cp patterns.example.txt patterns.local.txt     # patterns.local.* is gitignored
+#
+# Then replace the fictional terms with your own. Never commit patterns.local.txt:
+# the list of things you do not want public is itself sensitive.
+#
+# Format: one grep -E regex per line under a [SECTION]; '#' lines are comments.
+# Matching is case-insensitive. Escape regex metacharacters (. + ? ( ) [ ] { } | ^ $).
+# Prefer \b word boundaries for short terms to avoid substring noise.
+
+[BANNED]
+# Identity, location or affiliation terms that must never appear on the public site.
+\bExampleville\b
+\bNorthwind Holdings\b
+\bAcme Widgets Ltd\b
+# A registration / tax ID
+\bHRB 000000\b
+# A former brand or domain that must stay unlinked
+example-old-brand\.test
+
+[NAME]
+# The real name(s) behind a pseudonymous or brand-only site.
+\bJane (Q\.? )?Doe\b
+\bJ\. Doe\b
+
+[PII]
+# Known personal data — exact strings are better than broad regexes here.
+\b123 Fictional Street\b
+\+00 000 000 0000
+jane\.doe@example\.test
+\bDE00 0000 0000 0000 0000 00\b
+
+[PRICING]
+# Extra sales copy for a site that must not show pricing (review category).
+\b(€|\$)[ ]?299\b
+\bper firewall per month\b
+\bsix-figure\b
+
+[SCHEMA]
+# Extra structured-data patterns (built-in Offer/price detection is always on).
+"priceRange"
+
+[ALLOW]
+# Hits matching one of these are dropped — e.g. the public contact address.
+^hello@example\.test$
+^press@example\.test$

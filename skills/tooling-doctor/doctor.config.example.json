@@ -1,0 +1,17 @@
+{
+  "_comment": "Optional. Copy to doctor.config.json next to SKILL.md and adjust. Every key is optional; omitted keys use the defaults in scripts/doctor.py. Paths are relative to the repo root.",
+  "historical": ["skills-archive", "skills-disabled", "commands-archive", "history.md", "CHANGELOG.md"],
+  "repo_prefixes": ["scripts/", "apps/", ".claude/", ".agents/", "docs/", "packages/", "operations/", "shared/", "archive/", "infrastructure/", "deploy/", "src/"],
+  "vendored_skill_dirs": [".claude/vendor/skills"],
+  "archived_app_globs": ["archive/*archived-apps/*/"],
+  "app_prefix": "myorg-",
+  "generic_aliases": ["fleet", "video", "legal", "tax", "voice", "web", "auth", "api", "app", "core"],
+  "root_instruction_files": ["CLAUDE.md", "AGENTS.md"],
+  "ports_doc": ".claude/docs/ports.md",
+  "compose_globs": ["apps/*/docker-compose.yml", "apps/*/compose.yml", "operations/**/*.yml", "shared/**/*.yml"],
+  "port_claim_regex": "(?:(?<=:)|(?<=\\|\\s)|(?<=,\\s)|(?<=`))(\\d{4,5})\\b",
+  "ignore_ports": [],
+  "count_targets": [".claude/TOOLING.md", "CLAUDE.md", ".claude/docs/*.md", ".claude/rules/*.md"],
+  "apps_glob": "apps/*/",
+  "retired_file": "retired.json"
+}

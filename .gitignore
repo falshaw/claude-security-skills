@@ -1,0 +1,20 @@
+# User-supplied banned-term / PII pattern files (never commit)
+patterns.local.*
+**/patterns.local.*
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Audit output
+reports/
+*.log
+
+# Local configs copied from *.example.*
+*.local.json
+*.local.yml
+
+# Python
+__pycache__/
+*.pyc

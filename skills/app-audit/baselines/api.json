@@ -1,0 +1,157 @@
+{
+  "domain": "api",
+  "version": "1.0",
+  "description": "Gold-standard baseline for Python API services (FastAPI primary, Flask for tiny sidecars) running in Docker. This baseline has no audit_checklist: app-audit derives checks from `requirements`, `anti_patterns` and `deployment_checklist`. Use it as the whole grade for a standalone Python service, or as a SECTION of the parent app's audit when the service is a sidecar of a Next.js app.",
+  "baseline_versions": {
+    "_note": "Placeholders — set to your verified floors (OSV ranges / vendor releases) before the first run.",
+    "python_base": "python:<3.x.y>-slim@sha256:<digest>",
+    "fastapi": "==<pinned>",
+    "uvicorn": "==<pinned> with [standard] extras",
+    "starlette": ">=<floor from the latest starlette advisory> — pin explicitly; FastAPI's own range may allow a vulnerable starlette",
+    "sqlalchemy": "2.0.x",
+    "pydantic": "2.x with pydantic-settings"
+  },
+  "requirements": {
+    "stack": {
+      "framework": {
+        "fastapi": "Pinned exactly (==) in requirements.txt",
+        "flask": "Only for trivial single-file sidecars",
+        "uvicorn": "Pinned, [standard] extras (handles SIGTERM; no dumb-init needed unless zombie children are observed)",
+        "python": "Patch-pinned slim base, digest-pinned"
+      },
+      "database": {
+        "orm": "SQLAlchemy 2.0 with declarative Base",
+        "driver": "psycopg (3) or psycopg2-binary",
+        "migrations": "Alembic (create_all only as a dev fallback)",
+        "postgresql": "Digest-pinned postgres alpine image, one instance per app"
+      },
+      "validation": {
+        "schema": "Pydantic 2 + pydantic-settings",
+        "config": "Settings class with env_file support and an @lru_cache singleton — validates all env at import time"
+      },
+      "testing": {
+        "runner": "pytest (pinned)",
+        "http_client": "httpx with FastAPI TestClient",
+        "async": "pytest-asyncio"
+      },
+      "security": {
+        "rate_limiting": "slowapi — Limiter(key_func=get_remote_address) + app.state.limiter + RateLimitExceeded handler",
+        "cors": "CORSMiddleware with explicit allow_origins, allow_methods, allow_headers (never '*', never '*' with allow_credentials)",
+        "auth": "API key via APIKeyHeader('X-API-Key') + hmac.compare_digest(); applied as Depends() at include_router level",
+        "security_headers": "SecurityHeadersMiddleware adds X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, Permissions-Policy",
+        "encryption": "cryptography (Fernet / AES-GCM) for at-rest secrets; validate the key in lifespan(), fail fast"
+      }
+    },
+    "project_structure": {
+      "fastapi_app": [
+        "app/main.py (FastAPI entry, lifespan, middleware, router includes)",
+        "app/config.py (Pydantic Settings + @lru_cache) — small apps may inline os.getenv with explicit None checks",
+        "app/database.py (engine, SessionLocal, get_db dependency, Base)",
+        "app/auth.py (require_api_key dependency)",
+        "app/routers/ (one file per resource)",
+        "app/services/ (business logic, parsers, AI clients)",
+        "app/models.py or app/models/ (ORM)",
+        "app/schemas.py or app/schemas/ (Pydantic DTOs)",
+        "alembic/ + alembic.ini",
+        "tests/ (conftest.py with TestClient + override_get_db + SQLite in-memory)",
+        "requirements.txt (ALL versions pinned) + requirements.lock (hashes)",
+        "Dockerfile (multi-stage builder + runtime)",
+        ".env.example",
+        ".dockerignore (at this build context, not only the repo root)"
+      ]
+    },
+    "security": {
+      "api": [
+        "CORSMiddleware with an explicit origin list — never '*'",
+        "Explicit allow_methods and allow_headers",
+        "slowapi rate limiting wired (limiter + exception handler)",
+        "API key validation via Depends(require_api_key) applied at include_router level",
+        "hmac.compare_digest for key comparison (timing-safe)",
+        "Missing configured key -> 503 (fail closed), missing header -> 401, wrong key -> 403",
+        "Disable /docs and /redoc in production (docs_url=None, redoc_url=None)",
+        "Input validation via Pydantic models",
+        "SecurityHeadersMiddleware mounted",
+        "Model/LLM output parsed through a Pydantic model, never json.loads + .get()"
+      ],
+      "docker": [
+        "Non-root user (uid 1000 or 1001 — pick one, document it)",
+        "cap_drop: ALL, no cap_add for pure-Python services",
+        "no-new-privileges:true",
+        "read_only: true + tmpfs for /tmp and cache dirs",
+        "Health check via Python urllib (no curl in slim images), 127.0.0.1 not localhost",
+        "Published ports bound to 127.0.0.1",
+        "memory + cpus + pids limits"
+      ],
+      "supply_chain": [
+        "Every requirement pinned with == and installed from a hash-locked file (--require-hashes)",
+        "Transitive security floors pinned explicitly when the parent's range allows a vulnerable version (e.g. starlette under fastapi)",
+        "Sweep EVERY pin against OSV each audit — never a hand-picked subset"
+      ]
+    },
+    "testing": {
+      "pattern": "pytest with FastAPI TestClient",
+      "fixtures": "conftest.py with a test DB (SQLite in-memory) and dependency overrides for get_db + require_api_key",
+      "coverage_floor": 60,
+      "test_types": ["Unit tests for services/calculators", "Integration tests via TestClient", "Auth: 401/403/503 paths", "Rate-limit verification"]
+    },
+    "docker": {
+      "dockerfile": {
+        "base": "Patch- and digest-pinned python slim, multi-stage",
+        "system_deps": "Build tools (gcc, libpq-dev) in builder only; runtime gets only the runtime libs",
+        "venv": "Build into /opt/venv in stage 1, COPY --from=builder — keeps compilers out of the final image",
+        "pip": "pip install --no-cache-dir --require-hashes -r requirements.lock",
+        "user": "USER appuser before CMD",
+        "entrypoint": "CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"<port>\"] — 0.0.0.0 INSIDE the container is fine; only compose `ports:` publishes to the host",
+        "healthcheck": "HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:<port>/health')\" || exit 1"
+      }
+    },
+    "observability": {
+      "logging": "logging.getLogger(__name__); JSON output preferred (structlog or a JSON formatter)",
+      "health": "GET /health unauthenticated; round-trips the DB where there is one",
+      "startup": "@asynccontextmanager lifespan — fail fast on missing config; production runs `alembic upgrade head` before start",
+      "request_id": "Starlette middleware reading/generating X-Request-Id into contextvars"
+    }
+  },
+  "anti_patterns": [
+    { "id": "AP-API-01", "name": "Sync HTTP calls in async handlers", "fix": "httpx.AsyncClient — never requests.post inside an async route" },
+    { "id": "AP-API-02", "name": "No connection pooling", "fix": "SQLAlchemy pool with pool_pre_ping=True" },
+    { "id": "AP-API-03", "name": "Docs enabled in production", "fix": "docs_url=None, redoc_url=None in production" },
+    { "id": "AP-API-04", "name": "Unpinned requirements", "fix": "Pin ALL versions (==), hash-lock them" },
+    { "id": "AP-API-05", "name": "Root user in container", "fix": "useradd + USER appuser" },
+    { "id": "AP-API-06", "name": "Auth per route instead of per router", "fix": "dependencies=[Depends(require_api_key)] on include_router" },
+    { "id": "AP-API-07", "name": "Wildcard CORS", "fix": "Explicit origins, methods, headers" },
+    { "id": "AP-API-08", "name": "API key compared with ==", "fix": "hmac.compare_digest" },
+    { "id": "AP-API-09", "name": "Missing security headers middleware", "fix": "Add SecurityHeadersMiddleware" },
+    { "id": "AP-API-10", "name": "Subprocess via shell string", "fix": "subprocess.run([...]) with list args; never shell=True with interpolated input" },
+    { "id": "AP-API-11", "name": "Dead requirements file", "fix": "Check which file the Dockerfile actually COPYs from the compose build context; delete or fix the other" }
+  ],
+  "examples": {
+    "good": [
+      { "id": "EX-G01", "name": "Settings singleton", "code": "class Settings(BaseSettings):\n    database_url: str\n    model_config = SettingsConfigDict(env_file='.env')\n\n@lru_cache\ndef get_settings(): return Settings()" },
+      { "id": "EX-G02", "name": "Router-level auth + slowapi", "code": "limiter = Limiter(key_func=get_remote_address)\napp.state.limiter = limiter\napp.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)\napi_key_dep = [Depends(require_api_key)]\napp.include_router(documents.router, prefix='/api/documents', dependencies=api_key_dep)" },
+      { "id": "EX-G03", "name": "Timing-safe API key", "code": "async def require_api_key(api_key: str = Security(APIKeyHeader(name='X-API-Key', auto_error=False))) -> str:\n    expected = os.getenv('API_KEY')\n    if not expected:\n        raise HTTPException(503, 'API_KEY not configured')\n    if not api_key:\n        raise HTTPException(401, 'Missing X-API-Key header')\n    if not hmac.compare_digest(api_key, expected):\n        raise HTTPException(403, 'Invalid API key')\n    return api_key" }
+    ],
+    "bad": [
+      { "id": "EX-B01", "name": "Blocking call in async route", "code": "resp = requests.post(URL, json=payload)  # blocks the event loop" },
+      { "id": "EX-B02", "name": "No session cleanup", "code": "db = SessionLocal()\nreturn db.query(Model).all()  # session never closed" },
+      { "id": "EX-B03", "name": "Timing-unsafe comparison", "code": "if api_key == expected_key: return True" }
+    ]
+  },
+  "deployment_checklist": [
+    "requirements pinned with == and hash-locked",
+    "Multi-stage Dockerfile; compilers only in builder; /opt/venv copied across",
+    "Non-root user before CMD",
+    "/health endpoint (unauthenticated, round-trips the DB)",
+    "CORSMiddleware with explicit origins/methods/headers",
+    "SecurityHeadersMiddleware mounted",
+    "slowapi limiter wired",
+    "Router-level auth on every include_router",
+    "API key compared with hmac.compare_digest; fail closed when unset",
+    "Settings validated at startup",
+    "pool_pre_ping=True; alembic upgrade head before start",
+    "cap_drop ALL + no-new-privileges + read_only + tmpfs",
+    "Published port bound to 127.0.0.1",
+    "docs/redoc disabled in production",
+    "Log rotation in compose (json-file, max-size, max-file)"
+  ]
+}

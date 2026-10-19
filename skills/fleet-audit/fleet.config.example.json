@@ -1,0 +1,58 @@
+{
+  "_comment": "Copy to fleet.config.json (gitignored if it names private infrastructure) at your repo root or pass --config. Paths are relative to the repo root. Every value here is an example.",
+  "apps_dir": "apps",
+  "auto_discover": true,
+  "exclude_dirs": ["archive", ".claude"],
+  "shared_compose_dirs": ["shared", "infra"],
+  "reports_dir": "reports",
+  "apps": [
+    {
+      "name": "example-web",
+      "path": "apps/example-web",
+      "scope": "full",
+      "baseline": "nextjs",
+      "agents": true,
+      "notes": "Next.js + Prisma + Python worker sidecar"
+    },
+    {
+      "name": "example-api",
+      "path": "apps/example-api",
+      "scope": "full",
+      "baseline": "api",
+      "agents": false
+    },
+    {
+      "name": "example-desktop",
+      "path": "apps/example-desktop",
+      "scope": "reduced",
+      "baseline": null,
+      "notes": "Electron tray app, no Docker — skip Docker/Prisma categories"
+    },
+    {
+      "name": "example-cots",
+      "path": "apps/example-cots",
+      "scope": "reduced",
+      "notes": "Third-party images only: grade currency, exposure, secrets — not first-party standards"
+    }
+  ],
+  "floors": {
+    "next": "0.0.0",
+    "react": "0.0.0",
+    "_comment": "Set from the vendor security page / OSV, never from memory. 0.0.0 disables the check."
+  },
+  "shared_auth_core": {
+    "source": "packages/auth/auth-core.ts",
+    "copies": ["src/lib/auth-core.ts"],
+    "header_lines_ignored": 3,
+    "_comment": "Optional. If apps vendor a shared auth file, quick-checks diffs each copy against the source."
+  },
+  "accepted_risks": [
+    {
+      "app": "example-web",
+      "check": "0.0.0.0 bind on ingress proxy",
+      "reason": "Profile-gated public reverse proxy, never started by default",
+      "evidence": "docker-compose.yml: profiles: [\"public\"], restart: \"no\"",
+      "recheck_every_run": true
+    }
+  ]
+}

@@ -1,0 +1,353 @@
+{
+  "domain": "nextjs",
+  "version": "1.0",
+  "description": "Gold-standard baseline for self-hosted Next.js (App Router) applications running in Docker with PostgreSQL via Prisma 7, custom JWT auth (jose) and optional Python/Node sidecars. app-audit derives its score from `audit_checklist`; `deployment_checklist`, `anti_patterns` and `known_gotchas` are supporting evidence, not a second score. Edit `baseline_versions` to your own floors before the first run, and re-verify every floor against the vendor security page + OSV on each audit — versions rot.",
+  "baseline_versions": {
+    "_note": "Placeholders. Set these to YOUR verified floors. A floor comes from an advisory range (OSV/GHSA) or a vendor security release, never from a blog post.",
+    "node_base": "node:<active-LTS>-alpine@sha256:<digest>",
+    "nextjs_floor": "<lowest patched Next.js version from the latest vendor security release>",
+    "react": "19.2.x pinned",
+    "typescript": "5.9.x (TS 7 / ESLint 10 may not yet be supported by eslint-config-next — verify before bumping)",
+    "prisma": "7.x pinned explicitly (never `prisma@latest` — the dist-tag can point at a release-candidate major)",
+    "postgres_base": "postgres:<major.minor>-alpine@sha256:<digest>",
+    "redis_base": "redis:<major.minor.patch>-alpine@sha256:<digest>",
+    "python_sidecar_base": "python:<3.x.y>-slim@sha256:<digest>"
+  },
+  "requirements": {
+    "stack": {
+      "runtime": {
+        "node": "Active-LTS Node on Alpine, SHA256 digest-pinned in every Dockerfile. Do not adopt a non-LTS 'Current' line.",
+        "nextjs": "Tilde range (~X.Y.Z) on purpose — patch bumps only; a minor bump is a deliberate decision. Must be at or above the vendor security floor. Turbopack default, `next lint` removed (run eslint directly).",
+        "react": "Pinned exactly; bump all apps together, not one by one.",
+        "typescript": "5.9.x. Confirm typescript-eslint supports a new TS major before adopting it.",
+        "python_sidecar": "Digest-pinned slim base, 2-stage (builder venv -> runner), hash-pinned requirements.lock installed with --require-hashes, non-root uid 1001.",
+        "node_sidecar": "2-stage: builder `npm ci` + `tsc -p tsconfig.build.json` (NodeNext, rewriteRelativeImportExtensions), runner `npm ci --omit=dev` + dist/ only, `node dist/...`. Never tsx in a production image."
+      },
+      "database": {
+        "postgresql": "Digest-pinned postgres alpine image, one instance per app, never shared.",
+        "prisma": "Prisma 7.x. The datasource block has no url; the url lives in prisma.config.ts.",
+        "adapter": "@prisma/adapter-pg — MANDATORY for Prisma 7. Wired at RUNTIME in src/lib/prisma.ts: new PrismaClient({ adapter: new PrismaPg({ connectionString, max, idleTimeoutMillis, connectionTimeoutMillis }) }). Never in prisma.config.ts.",
+        "pool": "pg Pool config (max:10, min:2, idle:30s, connect:10s)",
+        "migrations_note": "If an endpoint-protection product blocks Prisma's engine binary (`prisma migrate` -> spawn UNKNOWN), apply the migration SQL via psql inside BEGIN/COMMIT together with the _prisma_migrations row (checksum = sha256 of migration.sql). Back up (pg_dump -Fc) first."
+      },
+      "cache": {
+        "redis": "Digest-pinned. Optional — an app without Redis must document it; rate limiting is then in-memory and durable lockout lives in the DB.",
+        "auth": "REQUIRED when present — password in REDIS_URL and REDIS_PASSWORD."
+      },
+      "auth": {
+        "primary": "Custom HS256 JWT (jose 6.x). If several apps share an auth core, VENDOR it (copy via a sync script) rather than importing across build contexts, and never hand-edit a per-app copy.",
+        "password": "bcryptjs cost 12",
+        "secret_validation": "Fail-fast: min 32 chars, reject known weak/placeholder patterns",
+        "lockout": "Durable, fail-closed, on the users row: failedLoginAttempts + lockedUntil (5 attempts -> 15 min), guarded updateMany to survive races, lock decided BEFORE the password result is used so a locked account answers like a wrong password (timing + enumeration safe). lastLoginAt stamped on success.",
+        "sessions": "sessions.token stores sha256(jwt), never the raw JWT — a DB dump must not carry live sessions. Expired rows pruned best-effort on login."
+      },
+      "validation": {
+        "schema": "zod 4. z.uuid() for route ids -> 400 before the DB; z.flattenError for 400 bodies.",
+        "forms": "react-hook-form + @hookform/resolvers where forms exist"
+      },
+      "testing": {
+        "unit": "Vitest 4.x/5.x. vitest.config.mts with tests/**/*.test.ts, node environment for lib + security-layer tests.",
+        "e2e": "Optional for a single-user local tool; verify UI in a real browser before claiming a page works.",
+        "coverage": "@vitest/coverage-v8 with thresholds ENFORCED in config so a drop fails `npm run test:coverage`. Floor 60 %; set a few points under the measured value once the app is properly tested. Prisma-heavy data layers are tested with the client mocked (vi.mock('@/lib/prisma')), not skipped."
+      },
+      "ui": {
+        "styling": "Tailwind CSS v4 via @tailwindcss/postcss, `@import \"tailwindcss\"` (not @tailwind directives)",
+        "icons": "lucide-react",
+        "charts": "recharts 3.x — eyeball charts after a major bump"
+      },
+      "ai": {
+        "provider_switch": "If the app calls an LLM: one client file dispatching on LLM_PROVIDER (see baselines/agents.json).",
+        "host_services": "Containers reach host-side services (local model server, LLM gateway) via host.docker.internal + `extra_hosts: host.docker.internal:host-gateway`. `localhost` inside a container is the container itself."
+      }
+    },
+    "project_structure": {
+      "required_directories": [
+        "prisma/ (schema.prisma, migrations/, seed.ts)",
+        "public/",
+        "src/app/ (App Router pages + API routes; a route group for the signed-in layout, login/ public)",
+        "src/app/api/ (request/response only — validation via src/lib validators, logic in src/lib)",
+        "src/components/",
+        "src/lib/ (services, validators, logger, ratelimit, lockout, prisma.ts, auth.ts)",
+        "src/proxy.ts (Next.js 16 request proxy: rate limit, CSRF, JWT verify, nonce CSP, x-request-id) — or src/middleware.ts on older layouts",
+        "tests/ (vitest; lib logic + the security layer: proxy, lockout, ratelimit)",
+        "worker/ (sidecar where one exists: app/, tests/, Dockerfile, requirements.txt + requirements.lock)",
+        "database/init-app-user.sh (least-privilege app role created from env on first volume init)"
+      ],
+      "required_root_files": [
+        "Dockerfile (4-stage: base -> deps -> builder -> runner, apk upgrade in base, digest-pinned base)",
+        "docker-compose.yml (pinned /24 ipam subnet, 127.0.0.1 ports, ${VAR:?} for every secret)",
+        "prisma.config.ts (APP ROOT) — defineConfig({ schema, migrations, datasource: { url: env('DATABASE_URL') } })",
+        "next.config.ts (output 'standalone', poweredByHeader false, security headers; CSP per request in proxy.ts)",
+        "tsconfig.json (strict: true, target ES2022, module esnext, @/* alias)",
+        "vitest.config.mts (coverage thresholds enforced)",
+        "postcss.config.mjs (@tailwindcss/postcss)",
+        ".env.example (every variable, with `openssl rand -hex 32` generation commands)",
+        ".dockerignore (tests, docs, .env*, backups/, *.dump, *.sql, sidecar dirs — the context carries only what the image needs; NEVER tsconfig.json on @/* alias apps)",
+        "CLAUDE.md and/or AGENTS.md (app-specific agent instructions)"
+      ],
+      "structure_note": "A flat src/lib with one file per concern is fine as long as route handlers stay thin (AP-NX-02)."
+    },
+    "security": {
+      "authentication": [
+        "Custom HS256 JWT (jose), algorithm pinned on verify",
+        "Zod validation on login input: email trimmed + lowercased, password min 1",
+        "Account lockout: 5 failed attempts -> 15 min, on the users row, fail-closed (a DB error = 500, never a session); locked account answers 401 like a wrong password",
+        "Unknown-email path runs bcrypt against a dummy cost-12 hash so timing does not reveal which emails exist",
+        "Password hashing bcryptjs cost 12 (never pass hashes through a shell — `$` gets expanded)",
+        "JWT_SECRET min 32 chars, weak/placeholder values rejected at first use",
+        "users.lastLoginAt stamped on success (+ session row with user agent / ip)",
+        "Session lookup key = sha256(jwt); expired sessions pruned on login"
+      ],
+      "csrf": [
+        "Origin/Host validation on all mutating requests (POST/PUT/PATCH/DELETE), run BEFORE the public-route exemption so login-CSRF is covered",
+        "Reject missing Origin and `Origin: null` with 403 (never a 500) — fail closed",
+        "Exempt only /api/webhooks/*, /api/cron/*, API-key Bearer requests — where such routes exist"
+      ],
+      "csp": [
+        "Per-request nonce (16 random bytes, base64) on signed-in pages: script-src 'self' 'nonce-{n}' 'strict-dynamic'",
+        "Set on BOTH the request headers (Next reads the nonce there) and the response",
+        "Prerendered public pages (/login) may use 'unsafe-inline' instead of a nonce — document it",
+        "frame-ancestors 'none', form-action 'self', base-uri 'self', object-src 'none'"
+      ],
+      "headers": [
+        "X-Frame-Options: DENY",
+        "X-Content-Type-Options: nosniff",
+        "Referrer-Policy: strict-origin-when-cross-origin",
+        "Permissions-Policy: camera=(), microphone=(), geolocation=()",
+        "Strict-Transport-Security when served over TLS",
+        "poweredByHeader: false in next.config.ts"
+      ],
+      "rate_limiting": [
+        "Every /api/* route limited from ONE place (proxy.ts) so a per-route limiter cannot be forgotten: e.g. writes 60/min, reads 240/min per key; /api/health exempt",
+        "Login: 10/min per IP + 5/min per email inside the route",
+        "In-memory acceptable when the app has no Redis (documented); durable layer is the DB lockout",
+        "Forwarded-IP headers trusted ONLY when an explicit TRUST_PROXY=1 is set",
+        "429 with Retry-After"
+      ],
+      "encryption": [
+        "AES-256-GCM for stored third-party credentials",
+        "ENCRYPTION_KEY from env (openssl rand -hex 32)",
+        "Never store plaintext secrets in the database"
+      ],
+      "docker": [
+        "no-new-privileges:true on ALL containers",
+        "cap_drop: ALL + selective cap_add (CHOWN/DAC_OVERRIDE/FOWNER/SETGID/SETUID) for Postgres/Redis only",
+        "read_only: true on app AND worker + tmpfs for /tmp and .next/cache",
+        "Non-root user: uid 1001 in every image",
+        "All published ports bound to 127.0.0.1 unless deliberately public",
+        "Dedicated /24 subnet per app with PINNED ipam (an unpinned network can grab another stack's range)",
+        "Health checks on ALL services (127.0.0.1, never localhost) with service_healthy depends_on; app health route round-trips the DB",
+        "Resource limits: memory + cpus + pids on every container (deploy.resources.limits.pids)",
+        "Log rotation: json-file, max-size 10-50m, max-file 3-5, compress true",
+        "${VAR:?error} for every secret; `:-` only for non-secret feature toggles",
+        "Least-privilege DB role for the runtime (no CREATE); migrations as superuser",
+        "After any source change rebuild AND confirm `docker inspect <c> -f '{{.Image}}'` equals the tagged image id (--force-recreate on mismatch)"
+      ],
+      "observability_ids": [
+        "x-request-id generated in proxy.ts on EVERY request and always overwritten (a client must not choose it)",
+        "Every error/warn log in a route carries requestId + route (+ userId); login lines never carry email or password"
+      ],
+      "sidecar": [
+        "Every sidecar HTTP API is authenticated with a shared-secret header, compared timing-safe, fail-closed when unset; only /health open. 'Loopback only' is not a substitute — any local process can reach 127.0.0.1.",
+        "Upload routes refuse on declared content-length BEFORE buffering; zip uploads on DECLARED uncompressed size",
+        "Model/LLM replies parsed through a schema (zod / pydantic), never bare JSON.parse + property access"
+      ]
+    },
+    "docker": {
+      "dockerfile": {
+        "pattern": "4-stage: base -> deps -> builder -> runner",
+        "security": "apk upgrade --no-cache in base stage",
+        "build_secrets": "Placeholder AUTH_SECRET / DATABASE_URL for build-time `prisma generate` only",
+        "output": "Standalone (copy .next/standalone + .next/static + public + prisma + generated client)",
+        "user": "uid 1001, gid 1001",
+        "healthcheck": "wget --spider http://127.0.0.1:3000/api/health every 30s, start_period 30-40s"
+      },
+      "compose": {
+        "healthchecks": "app: wget /api/health, python worker: urllib /health, postgres: pg_isready -h 127.0.0.1, redis: redis-cli -a $REDIS_PASSWORD ping",
+        "depends_on": "condition: service_healthy",
+        "resource_limits_example": {
+          "app": "768M-2G memory, 1-2 cpus, pids 200",
+          "worker": "512M memory, 1 cpu, pids 200",
+          "postgres": "512M memory, 0.5 cpus, pids 200",
+          "redis": "128-256M memory, 0.25-0.5 cpus"
+        },
+        "logging": "json-file, app 10m/3, db/redis 50m/5, compress true",
+        "restart": "unless-stopped for an app whose scheduled jobs must run unattended; 'no' is fine for an on-demand local tool. Document the choice in a compose comment."
+      },
+      "port_allocation": "Each app claims unique app/db/worker ports + a /24 subnet; keep a registry (generated from the compose files, not hand-written). On Windows hosts, Hyper-V/winnat dynamic ranges can reserve any port — the durable fix is `netsh int ipv4 add excludedportrange`."
+    },
+    "observability": {
+      "logging": "One JSON line per event on stdout (ts, level, msg, route, userId, requestId, err{name,message,code}); no request bodies or tokens",
+      "health_checks": [
+        "App: GET /api/health round-trips Postgres (503 'degraded' when down) — a health check that cannot fail is not a check",
+        "Sidecar: GET /health round-trips Postgres too",
+        "Postgres: pg_isready -U postgres -h 127.0.0.1"
+      ],
+      "operational": [
+        "Scheduled/background jobs are checked in the DATA, not the logs: query the job table for the last 7 days and confirm runs complete. A 'healthy' container whose every scheduled run fails is a P1.",
+        "Unbounded tables need a retention rule — measure pg_total_relation_size per table",
+        "Run ANALYZE before trusting n_live_tup",
+        "Cron-style routes need a scheduler AND a configured secret; a route waiting for a caller nobody set up is a dead feature. Verify in the data (last_run_at), never in `docker ps`."
+      ]
+    },
+    "patterns": {
+      "prisma_client": {
+        "file": "src/lib/prisma.ts (one name fleet-wide; flag a reintroduced db.ts)",
+        "critical": "ALL PrismaClient constructors use the PrismaPg adapter at runtime — including seeds",
+        "runtime_pattern": "pg Pool + PrismaPg adapter + new PrismaClient({ adapter }); globalThis singleton in non-prod",
+        "build_guard": "If DOCKER_BUILD is set, return a Proxy stub — `next build` collects page data without a DB",
+        "gotcha": "DATABASE_URL uses 127.0.0.1, not localhost (IPv6 resolution on Alpine)"
+      },
+      "api_handler": {
+        "pattern": "export const POST = apiHandler(async (ctx) => { ... }, { schema, roles, rateLimit })",
+        "features": ["Zod validation", "Auth", "Rate limiting", "Role-based access", "Error formatting", "Logging"]
+      }
+    }
+  },
+  "anti_patterns": [
+    { "id": "AP-NX-01", "name": "Prisma 7 without adapter", "severity": "critical", "fix": "Every PrismaClient() passes the PrismaPg adapter in src/lib/prisma.ts. prisma.config.ts only carries the datasource url for the CLI." },
+    { "id": "AP-NX-02", "name": "Business logic in route handlers", "severity": "high", "fix": "Extract to src/lib — routes handle request/response only" },
+    { "id": "AP-NX-03", "name": "Single-condition mock auth", "severity": "critical", "fix": "Triple-guard: NODE_ENV=development AND USE_MOCK_AUTH=true AND not a production URL" },
+    { "id": "AP-NX-04", "name": "console.log logging", "severity": "medium", "fix": "Structured JSON logger with levels and correlation ids" },
+    { "id": "AP-NX-05", "name": "No CSRF webhook exemptions", "severity": "high", "fix": "Exempt /api/webhooks/*, /api/cron/*, and Bearer API-key requests" },
+    { "id": "AP-NX-06", "name": "Hardcoded secrets in Docker", "severity": "critical", "fix": "Placeholders at build, real secrets via runtime env" },
+    { "id": "AP-NX-07", "name": "localhost in healthchecks", "severity": "high", "fix": "Always 127.0.0.1 (Alpine resolves localhost to IPv6)" },
+    { "id": "AP-NX-08", "name": "bcrypt hashes through shell", "severity": "high", "fix": "Pipe via Node stdin / execFile, never a shell string" },
+    { "id": "AP-NX-09", "name": "Plaintext credentials in DB", "severity": "critical", "fix": "AES-256-GCM via ENCRYPTION_KEY" },
+    { "id": "AP-NX-10", "name": "Missing log rotation", "severity": "medium", "fix": "json-file max-size/max-file/compress" },
+    { "id": "AP-NX-11", "name": "Port / subnet collision between stacks", "severity": "medium", "fix": "Unique ports + pinned /24 per app; regenerate the registry from compose files" },
+    { "id": "AP-NX-12", "name": "Hardcoded LLM provider", "severity": "medium", "fix": "Dispatch on LLM_PROVIDER; fail closed and loudly when the selected backend is unavailable" },
+    { "id": "AP-NX-13", "name": "Image pinned by tag alone", "severity": "medium", "fix": "image:tag@sha256:<digest>; copy the digest from the registry API, never hand-type it" },
+    { "id": "AP-NX-14", "name": "Container running an older image than the one just built", "severity": "high", "fix": "Compare `docker inspect <c> -f '{{.Image}}'` with `docker images -q <image>`; --force-recreate on mismatch" },
+    { "id": "AP-NX-15", "name": "Scheduled job judged by container health instead of its own results", "severity": "high", "fix": "Audit the job table for the last 7 days" },
+    { "id": "AP-NX-16", "name": "Rolling daily quota spent by the first scheduled run", "severity": "medium", "fix": "Split the daily cap across the day's slots (cap / slots per run)" },
+    { "id": "AP-NX-17", "name": "Append-only tables with no retention", "severity": "medium", "fix": "Prune superseded progress rows (keep N days / newest per parent)" },
+    { "id": "AP-NX-18", "name": "prisma@latest / npm audit fix --force", "severity": "critical", "fix": "Pin the 7.x range; never `npm audit fix --force` (it installs SemVer-major changes, sometimes downgrades)" },
+    { "id": "AP-NX-19", "name": "Missing extra_hosts for host services", "severity": "high", "fix": "`extra_hosts: host.docker.internal:host-gateway` on every service that calls a host-side service" }
+  ],
+  "examples": {
+    "good": [
+      { "id": "EX-G01", "name": "Prisma 7 init", "code": "// prisma.config.ts (APP ROOT)\nimport 'dotenv/config';\nimport { defineConfig, env } from 'prisma/config';\nexport default defineConfig({\n  schema: 'prisma/schema.prisma',\n  migrations: { path: 'prisma/migrations', seed: 'npx tsx prisma/seed.ts' },\n  datasource: { url: env('DATABASE_URL') },\n});\n\n// src/lib/prisma.ts (RUNTIME)\nconst pool = new Pool({ connectionString: process.env.DATABASE_URL!, max: 10, min: 2 });\nconst adapter = new PrismaPg(pool);\nexport const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });" },
+      { "id": "EX-G02", "name": "Auth secret validation", "code": "if (!secret || secret.length < 32 || KNOWN_WEAK.some(w => secret.includes(w))) throw new Error('FATAL: JWT_SECRET invalid');" },
+      { "id": "EX-G03", "name": "Consistent response shape", "code": "return NextResponse.json({ data: items, pagination: { total, page, limit, pages } })" },
+      { "id": "EX-G04", "name": "Compose host-service wiring", "code": "environment:\n  - LLM_PROVIDER=${LLM_PROVIDER:-gateway}\n  - LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-http://host.docker.internal:<gateway-port>}\n  - LLM_GATEWAY_TOKEN=${LLM_GATEWAY_TOKEN:?set LLM_GATEWAY_TOKEN}\nextra_hosts:\n  - \"host.docker.internal:host-gateway\"" }
+    ],
+    "bad": [
+      { "id": "EX-B01", "name": "Logic in route", "code": "export async function POST(req) { const body = await req.json(); const item = await prisma.item.create({ data: body }); return NextResponse.json(item); }" },
+      { "id": "EX-B02", "name": "Prisma without adapter", "code": "const prisma = new PrismaClient(); // BREAKS in Prisma 7" },
+      { "id": "EX-B03", "name": "Weak auth guard", "code": "if (process.env.USE_MOCK_AUTH === 'true') { /* allow */ }" },
+      { "id": "EX-B04", "name": "Exposed DB port", "code": "ports: ['5432:5432'] // should be '127.0.0.1:<host-port>:5432'" },
+      { "id": "EX-B05", "name": "No resource limits", "code": "// compose service with no deploy.resources.limits — can OOM the host" }
+    ]
+  },
+  "deployment_checklist": [
+    "output: 'standalone' and poweredByHeader: false in next.config.ts",
+    "4-stage Dockerfile with apk upgrade, digest-pinned base",
+    "Non-root uid 1001 in app and sidecar images",
+    "Health checks on every service; app route round-trips the DB",
+    "memory + cpus + pids limits on ALL containers",
+    "Log rotation (json-file, compress)",
+    "PrismaPg adapter in ALL PrismaClient constructors",
+    "Rate limiting on all API routes from proxy.ts (login 10/60s per IP + 5/60s per email)",
+    "CSRF Origin/Host check before the public-route exemption; webhook/cron/API-key exemptions where applicable",
+    "CSP with per-request nonce on signed-in pages",
+    "AES-256-GCM for stored third-party credentials (N/A when none stored)",
+    "Account lockout (5 / 15 min, DB row, fail-closed) + lastLoginAt",
+    "JWT secret validation (32+ chars, weak patterns rejected)",
+    "Security headers (X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy, HSTS)",
+    "cap_drop ALL + no-new-privileges + read_only + tmpfs",
+    "All ports bound to 127.0.0.1",
+    "Dedicated pinned /24 subnet",
+    "Test coverage >= 60 % ENFORCED in vitest config",
+    "Python sidecar: digest-pinned base, hash-pinned requirements.lock",
+    ".env.example with openssl commands; .dockerignore excludes .env*, backups, dumps, tests",
+    "Running container image == built image after every rebuild",
+    "Scheduled jobs verified in their own table for the last 7 days",
+    "Retention for append-only / progress tables",
+    "In-range `npm outdated` wanted versions applied; majors ask-first; `npm audit` highs explained if dev-only with no fix"
+  ],
+  "known_gotchas": [
+    { "issue": "Prisma 7 removed url from the datasource block", "fix": "prisma.config.ts with defineConfig() + PrismaPg adapter at runtime" },
+    { "issue": "Alpine resolves localhost to IPv6, breaking health checks", "fix": "127.0.0.1 in DATABASE_URL, REDIS_URL and health checks" },
+    { "issue": "bcrypt `$` characters break when passed through a shell", "fix": "Node stdin pipe or execFile" },
+    { "issue": "Tailwind CSS 4 uses @import syntax", "fix": "@import 'tailwindcss', not @tailwind directives" },
+    { "issue": "Zod 4 z.record() requires two arguments", "fix": "z.record(z.string(), z.unknown())" },
+    { "issue": "Edge middleware cannot import Prisma or bcrypt", "fix": "Keep the proxy/middleware edge-safe; DB work in route handlers" },
+    { "issue": "Linux containers cannot reach a host service at 127.0.0.1", "fix": "extra_hosts host.docker.internal:host-gateway" },
+    { "issue": "Renaming the project root breaks bind mounts", "fix": "`docker compose up -d --force-recreate` per stack; named volumes are safe" },
+    { "issue": "`AT TIME ZONE` on a naive timestamp goes the wrong way", "fix": "(col AT TIME ZONE 'UTC') AT TIME ZONE '<zone>' or convert in the app" },
+    { "issue": "Newer npm versions may skip unapproved install scripts", "fix": "Packages with binaries (e.g. electron) install without their postinstall — approve the script or run it explicitly" },
+    { "issue": ".dockerignore excluding tsconfig.json", "fix": "Breaks @/* alias resolution in the Docker build — never exclude it (tsconfig.tsbuildinfo is fine)" },
+    { "issue": "Windows case-insensitivity hides import-case bugs", "fix": "Linux Docker builds fail on `rateLimit` vs `ratelimit` — match imports to the real file case" }
+  ],
+  "audit_checklist": {
+    "note": "PASS = 1, PARTIAL = 0.5, FAIL = 0. N/A items are excluded from the denominator. Quote file:line or command output for every non-PASS.",
+    "security": [
+      { "id": "SEC-001", "check": "Custom JWT (jose) or equivalent vetted auth, algorithm pinned on verify; shared auth core (if any) unmodified vs its source" },
+      { "id": "SEC-002", "check": "Zod validation on login and every API body; route ids validated as UUID (400)" },
+      { "id": "SEC-003", "check": "Account lockout 5/15 min, durable (DB), fail-closed; locked account answers like a wrong password" },
+      { "id": "SEC-004", "check": "JWT secret min 32 chars + weak-pattern rejection" },
+      { "id": "SEC-005", "check": "Last-login tracking (users.lastLoginAt)" },
+      { "id": "SEC-006", "check": "CSRF Origin/Host check on all mutating requests incl. login; missing/null Origin -> 403" },
+      { "id": "SEC-007", "check": "CSP per-request nonce + strict-dynamic on signed-in pages, frame-ancestors none, on request AND response" },
+      { "id": "SEC-008", "check": "Security headers + poweredByHeader false" },
+      { "id": "SEC-009", "check": "Rate limiting on every API route from one place; auth limits; 429 + Retry-After; forwarded IPs only behind TRUST_PROXY" },
+      { "id": "SEC-010", "check": "AES-256-GCM for stored third-party credentials (N/A if none stored)" },
+      { "id": "SEC-011", "check": "No hardcoded secrets: build placeholders, ${VAR:?} at runtime, .env excluded from image and context" },
+      { "id": "SEC-012", "check": "Session tokens hashed at rest; expired rows pruned" },
+      { "id": "SEC-013", "check": "Sidecar/worker API authenticated with a timing-safe shared-secret header, fail-closed; only /health open" },
+      { "id": "SEC-014", "check": "Least-privilege DB role for the runtime (no CREATE); migrations as superuser" },
+      { "id": "SEC-015", "check": "npm audit: 0 high/critical in runtime deps; framework at or above the VENDOR security floor (vendor advisories can precede OSV/GitHub DB)" },
+      { "id": "SEC-016", "check": "Uploads refused on declared content-length before buffering; zip bombs on declared size" }
+    ],
+    "stack": [
+      { "id": "STK-001", "check": "Next.js at or above the configured floor, tilde range" },
+      { "id": "STK-002", "check": "React 19.2.x pinned" },
+      { "id": "STK-003", "check": "TypeScript 5.9.x, `tsc --noEmit` clean (install devDeps first)" },
+      { "id": "STK-004", "check": "Prisma 7 with PrismaPg adapter in src/lib/prisma.ts" },
+      { "id": "STK-005", "check": "prisma.config.ts at the app root with defineConfig + env('DATABASE_URL'); dotenv declared" },
+      { "id": "STK-006", "check": "zod 4" },
+      { "id": "STK-007", "check": "Tailwind 4 via @tailwindcss/postcss" },
+      { "id": "STK-008", "check": "Thin route handlers (AP-NX-02)" },
+      { "id": "STK-009", "check": "npm outdated: no in-range 'wanted' updates pending" },
+      { "id": "STK-010", "check": "Sidecar deps current (in-range) and hash-locked" },
+      { "id": "STK-011", "check": "tsconfig strict, ES2022, esnext, @/* alias" }
+    ],
+    "docker": [
+      { "id": "DKR-001", "check": "4-stage Dockerfile, apk upgrade in base" },
+      { "id": "DKR-002", "check": "Base images digest-pinned AND current (registry tag check)" },
+      { "id": "DKR-003", "check": "Non-root uid 1001 in every image" },
+      { "id": "DKR-004", "check": "Standalone output copied (standalone + static + public + prisma)" },
+      { "id": "DKR-005", "check": "Health checks on all services at 127.0.0.1, service_healthy depends_on, app health round-trips DB" },
+      { "id": "DKR-006", "check": "memory + cpus + pids limits on every container" },
+      { "id": "DKR-007", "check": "json-file log rotation with compress" },
+      { "id": "DKR-008", "check": "cap_drop ALL + no-new-privileges; selective cap_add on PG/Redis only" },
+      { "id": "DKR-009", "check": "read_only + tmpfs on app and worker" },
+      { "id": "DKR-010", "check": "All ports 127.0.0.1 (or a documented, profile-gated public ingress)" },
+      { "id": "DKR-011", "check": "Pinned /24 ipam subnet" },
+      { "id": "DKR-012", "check": "${VAR:?} for every secret" },
+      { "id": "DKR-013", "check": "Restart policy documented" },
+      { "id": "DKR-014", "check": "Running container image == built image for every service" },
+      { "id": "DKR-015", "check": ".dockerignore at every build context: no tests/docs/.env/dumps; tsconfig.json NOT excluded" }
+    ],
+    "testing": [
+      { "id": "TST-001", "check": "Vitest 4.x+" },
+      { "id": "TST-002", "check": "Coverage thresholds enforced in config (>= 60 %)" },
+      { "id": "TST-003", "check": "All tests pass (run them)" },
+      { "id": "TST-004", "check": "Security layer tested: proxy (CSRF, JWT, CSP, request id, limits), lockout, ratelimit" },
+      { "id": "TST-005", "check": "Sidecar tests exist and pass" },
+      { "id": "TST-006", "check": "Tests under tests/, never next to source" }
+    ],
+    "observability": [
+      { "id": "OBS-001", "check": "Structured JSON logger with levels; no bodies/tokens logged" },
+      { "id": "OBS-002", "check": "x-request-id on every request and every route log line" },
+      { "id": "OBS-003", "check": "App health round-trips DB; worker health too" },
+      { "id": "OBS-004", "check": "error.tsx / global-error.tsx / not-found.tsx present" },
+      { "id": "OBS-005", "check": "Job status visible in the UI where the app runs jobs" },
+      { "id": "OBS-006", "check": "Scheduled jobs succeeded in the last 7 days (query the job table)" },
+      { "id": "OBS-007", "check": "Table growth bounded (retention)" },
+      { "id": "OBS-008", "check": "No unexplained error-level lines in the app log for the last 48 h" },
+      { "id": "OBS-009", "check": "Every cron-style route has a scheduler and a configured secret; data shows recent runs" }
+    ]
+  }
+}

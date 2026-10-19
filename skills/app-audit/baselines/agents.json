@@ -1,0 +1,140 @@
+{
+  "domain": "agents",
+  "version": "1.0",
+  "scope": "Cross-cutting baseline for any app that calls an LLM: provider routing, an optional host-side LLM gateway (a local proxy that fronts a hosted model API or CLI), a local model server (e.g. Ollama), RAG through a shared vector store, streaming, sidecar agents. Apply it IN ADDITION to the app's domain baseline (nextjs.json / api.json). It does not cover Claude Code subagents or vendored third-party agent frameworks.",
+  "description": "Edit `config` to match your environment. Every hostname/port below is a placeholder.",
+  "config": {
+    "provider_env": "LLM_PROVIDER",
+    "providers": ["local", "gateway"],
+    "gateway_url_env": "LLM_GATEWAY_URL (e.g. http://host.docker.internal:<gateway-port>)",
+    "gateway_token_env": "LLM_GATEWAY_TOKEN",
+    "local_model_url_env": "LOCAL_LLM_URL (e.g. http://host.docker.internal:<model-server-port>)",
+    "app_name_header": "X-App-Name",
+    "vector_store": "Shared vector DB reached ONLY through the gateway's /rag/* endpoints (or your equivalent)"
+  },
+  "requirements": {
+    "provider_routing": {
+      "pattern": "ONE LLM client file per app reads LLM_PROVIDER at load time and dispatches. Every code path that ends at a backend which is down must fail CLOSED and LOUDLY (clean error + health flag), never hang.",
+      "typical_locations": { "nextjs": "src/lib/llm.ts or src/lib/ai/provider.ts", "python": "app/services/llm_provider.py" },
+      "defaults": "The compose default (`${LLM_PROVIDER:-<x>}`) is a feature toggle, the one allowed `:-` exception. Record which default each app ships and why; a default pointing at a backend that no longer exists is a finding.",
+      "what_routes_where": "Embeddings and streaming may not be supported by every backend — branch on the stream flag and route stream:true to a backend that streams."
+    },
+    "gateway": {
+      "compose_contract": {
+        "environment": [
+          "LLM_PROVIDER=${LLM_PROVIDER:-gateway}",
+          "LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-http://host.docker.internal:<gateway-port>}",
+          "LLM_MODEL=${LLM_MODEL:-<alias>}",
+          "LLM_GATEWAY_TOKEN=${LLM_GATEWAY_TOKEN:?set LLM_GATEWAY_TOKEN}"
+        ],
+        "extra_hosts": ["host.docker.internal:host-gateway"],
+        "note": "extra_hosts is MANDATORY on Linux containers that call a host-side service. `localhost` inside a container is the container."
+      },
+      "headers": {
+        "X-App-Name": "REQUIRED on every gateway call — drives per-app metrics, allowlist policy and rate limits. Observability/policy, NOT authentication (spoofable by any local process).",
+        "auth_token": "Shared secret header, compared constant-time on the gateway. Treat the gateway port as a trust boundary.",
+        "X-Request-Id": "Optional; propagate for tracing"
+      },
+      "policy": "Per-app allowlist (models + hourly budget) with a restrictive '*' default that fails closed for unknown apps."
+    },
+    "local_model_server": {
+      "exposure": "Never publish the model server port on 0.0.0.0. Reach it via a private network or host.docker.internal.",
+      "note": "An `OLLAMA_HOST=0.0.0.0:<port>`-style env is a bind inside the container's own network namespace — only a compose `ports:` entry publishes to the host."
+    },
+    "rag": {
+      "access": "Apps go through ONE retrieval API (gateway /rag/* or equivalent), never the vector DB SDK directly — keeps embedding model, dimensions and collection naming consistent.",
+      "collection_naming": "<app-or-domain>-<topic>, lowercase, hyphens/underscores, max 80 chars",
+      "chunking": "Long docs are upserted with server-side chunking and stable chunk ids (<id>#<n>) so re-upsert overwrites in place",
+      "dedup": "Omit the id to derive a deterministic UUID from sha256(text) — same content, same point",
+      "drift": "Record the embed model per collection; warn on mismatch",
+      "privacy": "Retrieved chunks are sent to whichever model generates the answer. A collection that must not leave the machine is either search-only or paired with a local provider.",
+      "backup": "Scheduled snapshot of every collection with rotation, or an explicit documented backup story"
+    },
+    "security": {
+      "llm_endpoints": [
+        "Input sanitization: strip HTML, cap prompt length",
+        "Rate limit all AI endpoints (e.g. 20/min generation, 50/min search)",
+        "Never splice raw user input into a system prompt",
+        "LLM output is untrusted: validate JSON with zod/pydantic, never execute or render it unescaped",
+        "Subprocess calls with array args only (execFile / subprocess.run([...]))",
+        "Constant-time comparison for every auth token"
+      ],
+      "docker": [
+        "Same hardening as the domain baseline (cap_drop ALL, no-new-privileges, read_only, tmpfs, 127.0.0.1)",
+        "Docker socket mounts only read-only, documented as an accepted risk, never on an internet-facing service"
+      ]
+    },
+    "testing": [
+      "Mock every backend (local model AND gateway) for deterministic tests",
+      "Provider-routing tests: same prompt takes different code paths per LLM_PROVIDER",
+      "Gateway auth: 401 on token mismatch; allowlist 403 on a disallowed model",
+      "JSON extraction strips markdown fences and validates the schema",
+      "Backend-down test: request fails fast with a clear error, no hang"
+    ],
+    "observability": [
+      "Per call: provider, model, operation, latency, status (success | error | timeout | fallback), cache hit/miss",
+      "Gateway /health reports each backend's reachability; the app's health/status surfaces 'AI unavailable' instead of a spinner",
+      "Fallback counter monitored — sustained fallbacks mean quota pressure"
+    ],
+    "patterns": {
+      "graceful_degradation": "Every AI call in try/catch with a meaningful fallback; RAG failure returns empty context",
+      "lazy_singleton": "SDK clients created on first use, not at import (prevents build failures)",
+      "timeouts": "Every outbound LLM call has an explicit timeout (AbortSignal.timeout / httpx timeout); a circuit breaker treats abort/timeout as a failure",
+      "circuit_breaker": "e.g. 3 retries with backoff, open after 5 consecutive failures for 5 min"
+    }
+  },
+  "anti_patterns": [
+    { "id": "AP-AG-01", "name": "Provider hardcoded", "severity": "high", "fix": "Single client file dispatching on LLM_PROVIDER" },
+    { "id": "AP-AG-02", "name": "Inline prompt strings everywhere", "severity": "medium", "fix": "Typed templates in one prompts module" },
+    { "id": "AP-AG-03", "name": "No retry/timeout on LLM calls", "severity": "high", "fix": "Explicit timeout + bounded retry with backoff + breaker" },
+    { "id": "AP-AG-04", "name": "Blocking LLM calls in async Python", "severity": "high", "fix": "httpx.AsyncClient" },
+    { "id": "AP-AG-05", "name": "No JSON output validation", "severity": "high", "fix": "zod / pydantic; retry once with a stricter prompt on parse failure" },
+    { "id": "AP-AG-06", "name": "Whole-document context injection", "severity": "high", "fix": "Chunked upsert + topK retrieval" },
+    { "id": "AP-AG-07", "name": "Model server port published to the host", "severity": "critical", "fix": "No `ports:` mapping on 0.0.0.0" },
+    { "id": "AP-AG-08", "name": "Subprocess via shell string", "severity": "critical", "fix": "Array args only" },
+    { "id": "AP-AG-09", "name": "Hosted-model SDK called directly when the architecture mandates the gateway", "severity": "high", "fix": "Route through the gateway — bypassing it bypasses metrics, cache, allowlist and billing controls" },
+    { "id": "AP-AG-10", "name": "Direct vector-DB SDK access", "severity": "high", "fix": "Go through the retrieval API" },
+    { "id": "AP-AG-11", "name": "Missing X-App-Name", "severity": "medium", "fix": "Send it on every gateway call" },
+    { "id": "AP-AG-12", "name": "Streaming routed to a non-streaming backend", "severity": "high", "fix": "Branch on the stream flag" },
+    { "id": "AP-AG-13", "name": "Sensitive collection paired with a hosted provider", "severity": "critical", "fix": "Search-only collection, or local provider for that app" },
+    { "id": "AP-AG-14", "name": "Hardcoded model id in source", "severity": "medium", "fix": "Read LLM_MODEL from env (alias like haiku|sonnet|opus mapped by the gateway)" },
+    { "id": "AP-AG-15", "name": "Dangling backend hostname", "severity": "medium", "fix": "Fallback strings in code pointing at a retired container/host — flag if the compose default does not override them" }
+  ],
+  "deployment_checklist": [
+    "LLM_PROVIDER with a documented default",
+    "Gateway URL / model / token env passthrough; token via ${VAR:?}",
+    "extra_hosts host.docker.internal:host-gateway on every service calling a host service",
+    "X-App-Name and the auth token header on every gateway call",
+    "App listed in the gateway allowlist with model + hourly budget",
+    "No direct vector-DB or hosted-model SDK imports when the gateway is mandated",
+    "Long docs chunked server-side",
+    "Streaming paths routed to a streaming backend",
+    "Rate limiting + input sanitization on all AI endpoints",
+    "Graceful, fast failure when the backend is down",
+    "Model server port not published",
+    "JSON output validated",
+    "Vector-store backup scheduled or documented"
+  ],
+  "audit_checklist": [
+    { "id": "AG-001", "category": "Stack", "check": "LLM_PROVIDER dispatch exists with a documented default that points at a live backend", "severity": "high" },
+    { "id": "AG-002", "category": "Stack", "check": "Gateway URL / model / token passthroughs in compose; token via ${VAR:?}", "severity": "high" },
+    { "id": "AG-003", "category": "Docker", "check": "extra_hosts host.docker.internal:host-gateway present on every service that calls a host service", "severity": "critical" },
+    { "id": "AG-004", "category": "Observability", "check": "Every gateway call sends X-App-Name", "severity": "medium" },
+    { "id": "AG-005", "category": "Security", "check": "Auth token header sent on every gateway call; gateway compares constant-time", "severity": "high" },
+    { "id": "AG-006", "category": "RAG", "check": "No direct vector-DB SDK import", "severity": "high" },
+    { "id": "AG-007", "category": "AI", "check": "No direct hosted-model SDK import when the gateway is mandated", "severity": "high" },
+    { "id": "AG-008", "category": "RAG", "check": "Long-doc upserts use server-side chunking", "severity": "medium" },
+    { "id": "AG-009", "category": "AI", "check": "Streaming paths route to a backend that streams", "severity": "high" },
+    { "id": "AG-010", "category": "Security", "check": "Sensitive collections are search-only or paired with a local provider", "severity": "critical" },
+    { "id": "AG-011", "category": "AI", "check": "Provider routing lives in one client file, not scattered", "severity": "medium" },
+    { "id": "AG-012", "category": "Observability", "check": "App present in the gateway allowlist with a model + hourly budget", "severity": "medium" },
+    { "id": "AG-013", "category": "Observability", "check": "Vector-store backup scheduled or documented", "severity": "high" },
+    { "id": "AG-014", "category": "Testing", "check": "Mocks cover every backend; routing + auth-failure + backend-down tests exist", "severity": "medium" },
+    { "id": "AG-015", "category": "AI", "check": "Model id read from env, not hardcoded", "severity": "medium" },
+    { "id": "AG-016", "category": "Security", "check": "Model server port not published to the host", "severity": "critical" },
+    { "id": "AG-017", "category": "Docker", "check": "Vector DB / model server images digest-pinned and above known CVE floors", "severity": "high" },
+    { "id": "AG-018", "category": "AI", "check": "JSON output validated with zod/pydantic", "severity": "high" },
+    { "id": "AG-019", "category": "AI", "check": "Explicit timeout + breaker on every outbound LLM call; dead backend surfaces as a clean error", "severity": "high" },
+    { "id": "AG-020", "category": "Security", "check": "Rate limiting + input caps on every AI endpoint", "severity": "high" }
+  ]
+}
