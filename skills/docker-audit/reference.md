@@ -35,16 +35,18 @@ runc --version        # if installed standalone
 
 ### Docker Compose CVE-2025-62725 (P1)
 
-Path traversal via OCI artifact `com.docker.compose.file` / `envfile` annotations. Triggered even by **read-only** commands (`docker compose ps`, `docker compose config`) if any project uses `include:` from an OCI registry. CVSS 8.9. Fixed in **v2.40.2** — this is the security floor, not the latest; Compose is on the v5.x line. Anything ≥ 2.40.2 is patched.
+Path traversal via remote OCI compose artifact layer annotations (`com.docker.compose.extends` / `com.docker.compose.envfile`). Triggered even by **read-only** commands (`docker compose ps`, `docker compose config`) when a project resolves a remote OCI compose artifact. CVSS 8.9. Fixed in **v2.40.2** — this is the security floor, not the latest; Compose is on the v5.x line. Anything ≥ 2.40.2 is patched.
 
 ```bash
 docker compose version   # require >= v2.40.2
 ```
 
-### Docker Engine 29 patches (P1)
+### Docker Engine 29 patches (P1, as of 2026-10)
 
 | CVE | What it fixes | Engine |
 | --- | --- | --- |
+| CVE-2026-95839 / GHSA-8647-2jxj-p2rc / GHSA-hc94-p972-ch66 | containerd v2.4.2: crash via the transfer service or a crafted `Content-Length`; crafted image / malicious registry exhausts host disk | **29.9.1** |
+| CVE-2026-53493 / 92543 / 92542 + BuildKit CVE-2026-93315 to -93323, -93326 | crafted OCI index; malicious DNS response skips registry TLS verification or falls back to HTTP; Swarm encrypted-overlay frame injection; BuildKit v0.33.1 cache poisoning, daemon panics, source-policy bypass | **29.8.2** |
 | CVE-2026-17106 / GHSA-hfg8-hc9c-6c3h | moby/go-archive < 0.3.0 — tar extraction uses lexical path validation then OS-resolved operations, so archive symlinks/hardlinks write **outside** the destination (`docker cp`, image-layer extraction). CVSS 7.1 | **29.7.0** |
 | CVE-2026-15793 / 15792 / 15791 / 15789 / 15788 | BuildKit v0.30.0-v0.31.1: Git-bundle checkout → host command injection (custom frontend / raw LLB only); malformed frontend params → panic; local-source destination validation bypass; LLB file-op can wipe `/tmp`; WCOW cache mount follows NTFS junctions (Windows containers only). Fixed BuildKit v0.31.2 | **29.6.2** |
 | GHSA-mjcv-p78q-w5fw / GHSA-jpcc-p29g-p8mq / GHSA-72x6-4j93-7w86 · GHSA-7236-3392-c5c6 | passwd/group parsing OOM · custom-frontend Seccomp/AppArmor bypass | **29.6.1** |
@@ -52,20 +54,20 @@ docker compose version   # require >= v2.40.2
 | CVE-2026-41568 | `docker cp` TOCTOU — file/dir creation at arbitrary host paths | 29.5.1 |
 | CVE-2026-42306 | `docker cp` TOCTOU — bind-mount redirect to arbitrary host paths | 29.5.1 |
 | CVE-2026-32288 | DoS — sparse tar in a malicious image pull causes unbounded daemon memory allocation | 29.5.0 |
-| CVE-2026-31431 | "copy.fail" — AF_ALG kernel crypto API escape. Mitigated by default seccomp (29.4.2) + AppArmor `deny network alg,` (29.4.3) | 29.4.2 / 29.4.3 |
-| CVE-2026-34040 | Engine AuthZ-plugin bypass — request bodies > 1 MB skip the plugin (CVSS 8.8) | 29.3.1 |
+| CVE-2026-31431 | AF_ALG kernel crypto API escape. Mitigated by the default seccomp profile (29.4.2), then AppArmor / SELinux rules (29.4.3) | 29.4.2 / 29.4.3 |
+| CVE-2026-34040 | Engine AuthZ-plugin bypass with an oversized request body; incomplete fix of CVE-2024-41110 (CVSS 8.8) | 29.3.1 |
 | CVE-2026-33997 | `docker plugin install` privilege-validation bypass | 29.3.1 |
-| CVE-2026-33747 / 33748 | BuildKit untrusted frontend / Git `#ref:subdir` file write outside state dir | 29.3.1 / BuildKit v0.28.1 |
+| CVE-2026-33747 / 33748 | BuildKit: untrusted frontend writes files outside the state dir / Git `#ref:subdir` exposes files outside the repo root | 29.3.1 / BuildKit v0.28.1 |
 
 Newer Engine 29.x releases have also fixed Go-runtime HTTP/2 daemon DoS issues and bundled containerd security fixes (crafted image / malicious registry during pull or import). If the newest Engine is not yet shipped by any Docker Desktop build, grade it as a **P3 watch**.
 
-**Practical host bar: Engine ≥ 29.7.0, BuildKit ≥ 0.31.2, runc ≥ 1.3.3, Compose ≥ 2.40.2.**
+**Practical host bar (2026-10): Engine ≥ 29.9.1, BuildKit ≥ 0.33.1, runc ≥ 1.3.6 / 1.4.3 / 1.5.x, Compose ≥ 2.40.2.** Latest at that date: Engine 29.9.2, BuildKit 0.34.1, runc 1.5.2, Compose 5.6.1.
 Sources: [Engine 29 release notes](https://docs.docker.com/engine/release-notes/29/), [GHSA-hfg8-hc9c-6c3h](https://github.com/advisories/GHSA-hfg8-hc9c-6c3h), [BuildKit releases](https://github.com/moby/buildkit/releases), [runc releases](https://github.com/opencontainers/runc/releases), [Compose releases](https://github.com/docker/compose/releases).
 
 ```bash
-docker version --format '{{.Server.Version}}'          # require >= 29.7.0
+docker version --format '{{.Server.Version}}'          # require >= 29.9.1
 docker buildx version                                   # buildx CLI plugin — NOT the BuildKit daemon
-docker buildx inspect --bootstrap | grep -i buildkit    # the BuildKit DAEMON version (floor 0.31.2)
+docker buildx inspect --bootstrap | grep -i buildkit    # the BuildKit DAEMON version (floor 0.33.1)
 ```
 
 > **buildx ≠ BuildKit:** `docker buildx version` reports the CLI plugin; the CVEs live in the **daemon**. On Docker Desktop they ship together; on a standalone builder, check the daemon explicitly.
@@ -341,7 +343,7 @@ services:
       - /tmp:size=100m,uid=1001,gid=1001,mode=1700,noexec,nosuid,nodev
 ```
 
-After CVE-2026-31431 ("copy.fail"), `docker-default` gained `deny network alg,` — making the profile explicit keeps that mitigation visible on Linux hosts.
+After CVE-2026-31431 (AF_ALG escape), Engine 29.4.3 added AppArmor / SELinux rules blocking AF_ALG sockets — making the profile explicit keeps that mitigation visible on Linux hosts.
 
 #### Category 14: AI/LLM Model Provenance + MCP / Gateway Security
 
@@ -791,8 +793,8 @@ services:
 ROOTS="apps infra shared"   # from audit.config.yml
 
 # === Host quick-checks (run FIRST) ===
-docker version --format '{{.Server.Version}}'            # >= 29.7.0
-docker buildx inspect --bootstrap | grep -i buildkit      # daemon >= 0.31.2
+docker version --format '{{.Server.Version}}'            # >= 29.9.1
+docker buildx inspect --bootstrap | grep -i buildkit      # daemon >= 0.33.1
 docker compose version                                    # >= 2.40.2
 docker info | grep -i runc                                # >= 1.3.3
 docker info | grep -iE "(seccomp|apparmor)"               # default seccomp (+ AppArmor on native Linux)
@@ -851,7 +853,7 @@ Digest pinning (Cat 12) is the defence against all of these *at pull time*.
 - **"Hades" campaign on PyPI** — Shai-Hulud lineage; packages using **Python startup hooks** (interpreter-start execution, not install time). Relevant to Python images.
 - **npm blocking install scripts by default** kills the classic mechanism, but load-time / interpreter-start execution already bypasses it. Plan the upgrade; don't treat it as a fix.
 - **Shai-Hulud / "Miasma" npm worm** — self-propagating `preinstall` worm sweeping Docker registry creds, cloud tokens, SSH/GPG keys and `.env` files, then attempting container escape. Any Node image built during the window may have run it — never put registry creds or `.env` in a build context; `npm ci` against a reviewed lock; scan built images.
-- **Trivy (Aqua) Docker Hub compromise** — poisoned `aquasec/trivy` 0.69.4/.5/.6, `:latest` pointed at the worst. Pin the scanner by digest.
+- **Trivy (Aqua) Docker Hub compromise** — poisoned `aquasec/trivy` 0.69.4 (also GHCR/ECR), 0.69.5 and 0.69.6 (Docker Hub); `:latest` now points back at 0.69.3, but a floating tag is how pulls got hit. Pin the scanner by digest.
 - **Checkmarx/KICS Docker Hub compromise** + **XZ backdoor still present in some Debian images** — pin public bases by digest, scan after pull.
 
 ## Historical pinned-base CVE notes (useful floors, as of 2026-10)
@@ -865,8 +867,8 @@ Re-check each vendor page before grading; these floors move.
 - **nginx:** floor **1.30.6** on the stable line (later 2026 advisories need 1.30.5 / 1.30.6 — see [nginx.org security advisories](https://nginx.org/en/security_advisories.html)). 1.30.4 fixed CVE-2026-42533 buffer overflow with `map` + regex, CVE-2026-60005 `ngx_http_slice_module` memory disclosure, CVE-2026-56434 `ngx_http_ssi_module` UAF; 1.30.3 fixed CVE-2026-42055 proxy_v2/grpc heap overflow and CVE-2026-48142 charset overread; 1.30.1 fixed CVE-2026-42945 (rewrite module overflow, ≤ 1.30.0). Stay on the stable line.
 - **caddy 2.11.x:** CVE-2026-30851 `forward_auth copy_headers` header injection (2.10.0-2.11.1, fixed 2.11.2) — unreachable without `forward_auth`; currency only.
 - **Node 24.x:** CVE-2026-48933 WebCrypto remote crash, CVE-2026-48618 TLS wildcard auth bypass, CVE-2026-48615 proxy credential leak via `ERR_PROXY_TUNNEL`; later CVE-2026-56846 / -56848 (HTTP/2 retained headers, heap UAF) + CVE-2026-58043 (Permission Model path matching). Note: an image tag can be pushed *before* the security release — check the build date vs the release.
-- **Python 3.11.16 / 3.12.14:** CVE-2026-2297 (`SourcelessFileLoader` without `io.open_code()`), CVE-2026-4224 (unbounded C recursion in XML parsing), CVE-2026-3644 (control-char injection in `http.cookies`), `tarfile` symlink-traversal bypass.
-- **redis 8.x:** CVE-2026-23479 / -25243 / -23631 / -25588 / -25589 (authenticated RCE paths); 8.10.1 security release: CVE-2026-62356 CMSketch RDB heap OOB write, RDB `SLOT_INFO` out-of-range → RCE, TLS client-cert CN NUL-byte auth bypass. Severity is P2 rather than P1 when Redis is password-protected and loopback-only.
-- **Grafana 11.4.5:** CVE-2025-4123 (exploited in the wild — path traversal + open redirect → stored XSS / SSRF with image renderer). Promtail is deprecated upstream → `grafana/alloy`.
+- **Python 3.11.16 / 3.12.14** (3.11 is at 3.11.18 by 2026-10): CVE-2026-2297 (`SourcelessFileLoader` without `io.open_code()`), CVE-2026-4224 (unbounded C recursion in XML parsing), CVE-2026-3644 (control-char injection in `http.cookies`), `tarfile` symlink-traversal bypass.
+- **redis 8.x:** CVE-2026-23479 / -25243 / -23631 / -25588 / -25589 (authenticated RCE paths); fixed in 8.6.3 / 8.4.3 / 8.2.6; 8.10.1 security release (8.10.2 is newer): CVE-2026-62356 CMSketch RDB heap OOB write, RDB `SLOT_INFO` out-of-range → RCE, TLS client-cert CN NUL-byte auth bypass. Severity is P2 rather than P1 when Redis is password-protected and loopback-only.
+- **Grafana 11.4.5:** CVE-2025-4123 fixed (path traversal + open redirect → XSS; SSRF only with the Image Renderer plugin; CVSS 7.6; not in CISA KEV as of 2026-10). Promtail is deprecated upstream → `grafana/alloy`.
 - **vLLM:** CVE-2026-22778 (critical RCE via malicious video link) — ≥ 0.14.1.
-- **MCP ecosystem:** dozens of CVEs across SDKs (command injection dominant); CVE-2026-33032 "MCPwn" (nginx-ui MCP, CVSS 9.8) exploited in the wild. Audit every MCP server for network exposure + auth, version-lock them, and disable any server whose instructions attempt to override the agent's tools or rules.
+- **MCP ecosystem:** dozens of CVEs across SDKs (command injection dominant); CVE-2026-33032 (nginx-ui MCP endpoint, CVSS 9.8), exploitation reported by vendors and CSA Singapore (not in CISA KEV as of 2026-10; fixed-version reports disagree, check NVD). Audit every MCP server for network exposure + auth, version-lock them, and disable any server whose instructions attempt to override the agent's tools or rules.

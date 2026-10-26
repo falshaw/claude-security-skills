@@ -171,10 +171,12 @@ branch protection · **7** workflows **SHA-pinned + least-privilege (automate wi
 `dependabot.yml`, stale PRs.
 
 - **7.2b — Trivy Actions referenced by tag/branch = P0.** `aquasecurity/trivy-action` tags 0.0.1–0.34.2
-  and all `aquasecurity/setup-trivy` tags were force-pushed to credential-stealing commits
-  (GHSA-69fq-xp46-6x23). Any workflow that ran such a ref → rotate every secret it could read.
-  Safe pin = trivy-action v0.35.0 `57a97c7e7821a5776cebc9bb87c984fa69cba8f1` (re-verify with
-  `git ls-remote --tags https://github.com/aquasecurity/trivy-action`).
+  and every `aquasecurity/setup-trivy` tag before the recreated 0.2.6 were force-pushed to credential-stealing commits
+  (GHSA-69fq-xp46-6x23 / CVE-2026-33634). Any workflow that ran such a ref → rotate every secret it could read.
+  Safe pins as of 2026-10: trivy-action v0.35.0 = commit `57a97c7e7821a5776cebc9bb87c984fa69cba8f1`;
+  newer v0.36.0 = commit `ed142fd0673e97e23eac54620cfb913e5ce36c25` (an annotated tag: pin the
+  `^{}` commit, not the tag object). Re-verify with
+  `git ls-remote --tags https://github.com/aquasecurity/trivy-action`.
 - zizmor finding map: template-injection / dangerous-triggers / artipacked = **P1**; unpinned-uses /
   excessive-permissions = **P2**.
 

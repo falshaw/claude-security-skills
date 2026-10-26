@@ -60,12 +60,14 @@ Copy this checklist into the run and tick it off:
 
 ## Host runtime quick-checks (run FIRST — a vulnerable engine makes per-stack hardening moot)
 
+Floors as of 2026-10 (re-check upstream each run):
+
 | Check | Command | Security floor (re-check upstream each run) | Sev if behind |
 | --- | --- | --- | --- |
 | runc | `docker info \| grep -i runc` | ≥ 1.2.8 / 1.3.3 / 1.4.0 (CVE-2025-31133/52565/52881 escape trio); 1.3.6+ / 1.4.3+ also close CVE-2026-41579 | **P0** |
-| Docker Engine | `docker version --format '{{.Server.Version}}'` | ≥ 29.7.0 (CVE-2026-17106 go-archive tar-extraction escape, CVSS 7.1, plus all earlier 29.x fixes) | **P1** |
-| BuildKit (daemon, NOT the buildx CLI) | `docker buildx inspect --bootstrap \| grep -i buildkit` | ≥ 0.31.2 (CVE-2026-15788/89/91/92/93) | **P1** |
-| Docker Compose | `docker compose version` | ≥ 2.40.2 (CVE-2025-62725 OCI `include:` path traversal) | **P1** |
+| Docker Engine | `docker version --format '{{.Server.Version}}'` | ≥ 29.9.1 (29.9.1 containerd pull crashes CVE-2026-95839; 29.8.2 CVE-2026-53493/92542/92543; 29.7.0 CVE-2026-17106 go-archive tar-extraction escape; plus all earlier 29.x fixes) | **P1** |
+| BuildKit (daemon, NOT the buildx CLI) | `docker buildx inspect --bootstrap \| grep -i buildkit` | ≥ 0.33.1 (CVE-2026-93315 to -93323 and -93326; earlier 0.31.2 CVE-2026-15788/89/91/92/93) | **P1** |
+| Docker Compose | `docker compose version` | ≥ 2.40.2 (CVE-2025-62725 path traversal via remote OCI compose artifact annotations) | **P1** |
 
 - Record the live host numbers in report §1 every run. A newer upstream release that no Docker Desktop build ships yet is a **P3 watch**, not a miss.
 - Floors move: before grading, read the Engine / BuildKit / runc / Compose release notes (links in reference.md) and raise a floor when a new CVE fix lands.

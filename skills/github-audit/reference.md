@@ -296,8 +296,8 @@ trivy fs --scanners secret,misconfig --severity HIGH,CRITICAL .   # 2nd secret p
 
 **7.2b detail:** per GHSA-69fq-xp46-6x23, `aquasecurity/trivy-action` tags 0.0.1–0.34.2 and all
 `aquasecurity/setup-trivy` tags (v0.2.0–v0.2.6) were force-pushed to credential-stealing commits; the trivy
-v0.69.4 binary and v0.69.5 / v0.69.6 Docker Hub images were malicious too. Safe: trivy-action **v0.35.0 =
-`57a97c7e7821a5776cebc9bb87c984fa69cba8f1`**, setup-trivy 0.2.6 (recreated), trivy binary v0.69.2 / v0.69.3.
+v0.69.4 binary and v0.69.5 / v0.69.6 Docker Hub images were malicious too. Safe (as of 2026-10): trivy-action **v0.35.0 =
+`57a97c7e7821a5776cebc9bb87c984fa69cba8f1`** or v0.36.0 = commit `ed142fd0673e97e23eac54620cfb913e5ce36c25`, setup-trivy 0.2.6 (recreated), trivy binary v0.69.2 / v0.69.3.
 Verify: `git ls-remote --tags https://github.com/aquasecurity/trivy-action`. If a hijacked ref ever ran,
 rotate every secret the workflow could read and review run logs from the compromise window. A correct SHA
 with a wrong `# vX.Y.Z` comment = label drift, P3. Disabled workflow files still carrying `@master` refs
