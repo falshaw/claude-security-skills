@@ -415,8 +415,13 @@ USER nextjs
 tmpfs:
   - /tmp:size=100m,uid=101,gid=101
   - /var/cache/nginx:size=50m,uid=101,gid=101
-  - /etc/nginx/conf.d:size=10m,uid=101,gid=101
+  - /run:size=1m,uid=101,gid=101          # nginx.pid
 ```
+
+Never put a tmpfs on `/etc/nginx/conf.d`: the mount hides the `default.conf` copied in at build time
+and nginx starts with no server block. Tmpfs only the cache and run dirs. If the image renders
+`/etc/nginx/templates/*.template` at start, point the output at a tmpfs
+(`NGINX_ENVSUBST_OUTPUT_DIR=/tmp/conf.d`) and `include /tmp/conf.d/*.conf;` from `nginx.conf`.
 
 ### Pin Image Versions (P2)
 
@@ -460,20 +465,31 @@ CMD ["node", "server.js"]
 ### 2-Stage Dockerfile — Python (P2)
 
 ```dockerfile
-FROM python:3.<minor>.<patch>-slim@sha256:<digest> AS base
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# Stage 1: builder — installs dependencies into a venv; pip caches and build tools stay here
+FROM python:3.<minor>.<patch>-slim@sha256:<digest> AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.txt
 
-FROM base AS runner
+# Stage 2: runner — same base digest, only the venv and the app code
+FROM python:3.<minor>.<patch>-slim@sha256:<digest> AS runner
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
-COPY requirements.txt .
-RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 COPY . .
 RUN rm -f .env
 USER appuser
 EXPOSE 8000
 CMD ["python", "main.py"]
 ```
+
+`--require-hashes` only works on a hash-locked file: every requirement pinned with `==` and carrying
+`--hash=sha256:...`, transitive dependencies included (`pip-compile --generate-hashes` or
+`uv pip compile --generate-hashes`). A plain `requirements.txt` fails the build. Use the same base
+image digest in both stages so the venv's interpreter path matches.
 
 ### Container Hardening (P1/P2)
 
@@ -838,14 +854,16 @@ Digest pinning (Cat 12) is the defence against all of these *at pull time*.
 - **Trivy (Aqua) Docker Hub compromise** — poisoned `aquasec/trivy` 0.69.4/.5/.6, `:latest` pointed at the worst. Pin the scanner by digest.
 - **Checkmarx/KICS Docker Hub compromise** + **XZ backdoor still present in some Debian images** — pin public bases by digest, scan after pull.
 
-## Historical pinned-base CVE notes (useful floors)
+## Historical pinned-base CVE notes (useful floors, as of 2026-10)
 
-- **postgres 16.14:** CVE-2026-6638 SQLi via table name in `REFRESH PUBLICATION`, -6637 `refint` stack overflow + SQLi, -6478 MD5 password disclosure via timing, -6477 `libpq` `lo_*` client-stack overwrite, -6475 `pg_basebackup`/`pg_rewind` file overwrite, -6474 `timeofday()` memory disclosure. **postgres 16.15:** 28 CVEs incl. CVE-2026-19385 `pg_dump` heap overflow → RCE (CVSS 8.8). Flag anything ≤ 16.14.
+Re-check each vendor page before grading; these floors move.
+
+- **postgres 16.14:** CVE-2026-6638 SQLi via table name in `REFRESH PUBLICATION`, -6637 `refint` stack overflow + SQLi, -6478 MD5 password disclosure via timing, -6477 `libpq` `lo_*` client-stack overwrite, -6475 `pg_basebackup`/`pg_rewind` file overwrite, -6474 `timeofday()` memory disclosure. **postgres 16.15:** 25 CVEs that apply to 16.x (28 across all branches) incl. CVE-2026-19385 `pg_dump` heap overflow → RCE (CVSS 8.8). Flag anything ≤ 16.14.
 - **pgvector:** CVE-2026-3172 buffer overflow in parallel HNSW index builds (fixed 0.8.2); also check the bundled Postgres minor in-image. Optional per DB after bump: `ALTER EXTENSION vector UPDATE;`.
 - **Qdrant:** CVE-2026-25628 (CVSS 8.8) `/logger` file write, affected 1.9.3 → < **1.16.0** (v1.15.6 was NOT a fix).
-- **Ollama:** CVE-2026-7482 "Bleeding Llama" unauthenticated GGUF memory leak (CVSS 9.1), fixed ≥ 0.17.1; Ollama for Windows auto-updater CVE-2026-42248/-42249 — compare the host version with the release notes.
-- **nginx 1.30.4:** CVE-2026-42533 buffer overflow with `map` + regex, CVE-2026-60005 `ngx_http_slice_module` memory disclosure, CVE-2026-56434 `ngx_http_ssi_module` UAF, CVE-2026-42055 proxy_v2/grpc heap overflow, CVE-2026-48142 charset overread. Earlier: CVE-2026-42945 "NGINX Rift" (≤ 1.30.0). Stay on the stable line.
-- **caddy 2.11.x:** CVE-2026-30851 `forward_auth copy_headers` header injection (2.10.0-2.11.1) — unreachable without `forward_auth`; currency only.
+- **Ollama:** CVE-2026-7482 unauthenticated GGUF heap read (CVSS 9.1), fixed ≥ 0.17.1; Ollama for Windows auto-updater CVE-2026-42248 (no signature check) / -42249 (path traversal), both CVSS 9.8, affected 0.12.10-0.17.5 — compare the host version with the release notes.
+- **nginx:** floor **1.30.6** on the stable line (later 2026 advisories need 1.30.5 / 1.30.6 — see [nginx.org security advisories](https://nginx.org/en/security_advisories.html)). 1.30.4 fixed CVE-2026-42533 buffer overflow with `map` + regex, CVE-2026-60005 `ngx_http_slice_module` memory disclosure, CVE-2026-56434 `ngx_http_ssi_module` UAF; 1.30.3 fixed CVE-2026-42055 proxy_v2/grpc heap overflow and CVE-2026-48142 charset overread; 1.30.1 fixed CVE-2026-42945 (rewrite module overflow, ≤ 1.30.0). Stay on the stable line.
+- **caddy 2.11.x:** CVE-2026-30851 `forward_auth copy_headers` header injection (2.10.0-2.11.1, fixed 2.11.2) — unreachable without `forward_auth`; currency only.
 - **Node 24.x:** CVE-2026-48933 WebCrypto remote crash, CVE-2026-48618 TLS wildcard auth bypass, CVE-2026-48615 proxy credential leak via `ERR_PROXY_TUNNEL`; later CVE-2026-56846 / -56848 (HTTP/2 retained headers, heap UAF) + CVE-2026-58043 (Permission Model path matching). Note: an image tag can be pushed *before* the security release — check the build date vs the release.
 - **Python 3.11.16 / 3.12.14:** CVE-2026-2297 (`SourcelessFileLoader` without `io.open_code()`), CVE-2026-4224 (unbounded C recursion in XML parsing), CVE-2026-3644 (control-char injection in `http.cookies`), `tarfile` symlink-traversal bypass.
 - **redis 8.x:** CVE-2026-23479 / -25243 / -23631 / -25588 / -25589 (authenticated RCE paths); 8.10.1 security release: CVE-2026-62356 CMSketch RDB heap OOB write, RDB `SLOT_INFO` out-of-range → RCE, TLS client-cert CN NUL-byte auth bypass. Severity is P2 rather than P1 when Redis is password-protected and loopback-only.

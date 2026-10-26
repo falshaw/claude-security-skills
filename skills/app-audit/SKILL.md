@@ -1,6 +1,6 @@
 ---
 name: app-audit
-description: Audits ONE self-hosted web app (Next.js + Docker + Prisma, or a Python FastAPI service) against a configurable gold-standard baseline JSON and outputs a graded report card with P0-P3 findings, quoted evidence and a remediation plan. Read-only. Use when the user says "audit <app>", "app audit", "grade this app", "how good is <app>", "check this app against the baseline", or after a large change to one app. For many apps at once use fleet-audit; for container-only hardening use docker-audit.
+description: Audits ONE self-hosted web app (Next.js + Docker + Prisma, or a Python FastAPI service) against a configurable gold-standard baseline JSON and outputs a graded report card with P0-P3 findings, quoted evidence and a remediation plan. Read-only. Use when the user says "audit [app]", "app audit", "grade this app", "how good is [app]", "check this app against the baseline", or after a large change to one app. For many apps at once use fleet-audit; for container-only hardening use docker-audit.
 argument-hint: '<path to app dir, e.g. apps/<name>> [--baseline nextjs|api|<path.json>] [--agents]'
 ---
 

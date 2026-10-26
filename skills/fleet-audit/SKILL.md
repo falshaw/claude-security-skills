@@ -9,7 +9,7 @@ Audit N apps against shared standards in **12 categories**, produce P0–P3 find
 evidence, a per-app report card and a fleet grade. This file is the entry point; the full checklists,
 templates, gotchas and verification playbooks are in **[reference.md](./reference.md)**. Reproducible
 checks are a script: **[scripts/quick-checks.sh](./scripts/quick-checks.sh)**. Per-app grading reuses
-the `app-audit` baselines (`skills/app-audit/baselines/*.json`).
+the `app-audit` baselines (`.claude/skills/app-audit/baselines/*.json`).
 
 **Read-only by default.** The audit never installs, builds, restarts, pushes or deploys. If the user
 asks for fixes afterwards, every fix is followed by a rebuild + health check (see *Post-fix
@@ -29,7 +29,7 @@ auto-discovers `apps/*`.
 
 ## Core process
 
-1. **Discovery** — run `bash skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json`
+1. **Discovery** — run `bash .claude/skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json`
    (add `--no-net` to skip npm/OSV/docker). Classify every dir. State the denominator.
 2. **Per-app scan** — `package.json` + lockfile, compose, every Dockerfile at every build `context:`,
    `AGENTS.md`/`CLAUDE.md`, `src/lib/prisma.ts`, `src/lib/auth*.ts`, `src/proxy.ts` / `src/middleware.ts`,
@@ -93,9 +93,9 @@ patterns in docs drift.
 ## Quick diagnostic checks
 
 ```bash
-bash skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json          # all checks
-bash skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json --no-net # offline
-NEXT_FLOOR=16.4.1 bash skills/fleet-audit/scripts/quick-checks.sh                   # ad-hoc floor
+bash .claude/skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json          # all checks
+bash .claude/skills/fleet-audit/scripts/quick-checks.sh --config fleet.config.json --no-net # offline
+NEXT_FLOOR=16.4.1 bash .claude/skills/fleet-audit/scripts/quick-checks.sh                   # ad-hoc floor
 ```
 
 Covers: roster vs config, compose files by content, declared vs resolved versions, vendor-floor check,

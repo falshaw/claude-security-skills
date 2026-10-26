@@ -33,7 +33,7 @@ jane\.doe@example\.test
 
 [PRICING]
 # Extra sales copy for a site that must not show pricing (review category).
-\b(€|\$)[ ]?299\b
+(€|\$)[ ]?299\b
 \bper firewall per month\b
 \bsix-figure\b
 

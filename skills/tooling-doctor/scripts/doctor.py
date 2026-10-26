@@ -59,7 +59,7 @@ DEFAULT_CONFIG = {
     # Inventory-count claims ("12 skills", "5 apps") are checked in these files.
     "count_targets": [".claude/TOOLING.md", "CLAUDE.md", ".claude/docs/*.md", ".claude/rules/*.md"],
     "apps_glob": "apps/*/",
-    # Retired-entity list. Falls back to retired.example.json only if this is missing.
+    # Retired-entity list. If missing, only archived app dirs are checked (no example fallback).
     "retired_file": "retired.json",
 }
 
@@ -145,7 +145,7 @@ def load_settings() -> dict:
             try:
                 return json.loads(read(p))
             except json.JSONDecodeError as exc:
-                add("P1", "config", f".claude/{candidate} is not valid JSON", str(exc))
+                add("P1", "overrides", f".claude/{candidate} is not valid JSON", str(exc))
     return {}
 
 
@@ -195,15 +195,10 @@ def check_skill_overrides() -> str:
     for sub in ("skills-archive", "skills-disabled"):
         parked |= {os.path.basename(p.rstrip(os.sep)) for p in glob.glob(os.path.join(CLAUDE, sub, "*", ""))}
 
-    # An override also legitimately targets a skill or command that a PLUGIN provides, and
-    # those live under ~/.claude/plugins/, not in this repo. Counting only local folders
-    # makes installed plugin entries look like dead config; deleting them silently switches
-    # those skills back ON. They are not dead — they are the only thing keeping them off.
+    # Plugin skills are NOT affected by skillOverrides (code.claude.com/docs/en/skills — they
+    # are managed through /plugin), so a plugin skill name does not make an entry live.
+    # User-global skills and commands do: entries match skill names across all scopes.
     home_claude = os.path.join(os.path.expanduser("~"), ".claude")
-    for pat in (os.path.join("**", "skills", "*", "SKILL.md"), os.path.join("**", "commands", "**", "*.md")):
-        for f in glob.glob(os.path.join(home_claude, "plugins", pat), recursive=True):
-            base = os.path.dirname(f) if f.endswith("SKILL.md") else f[:-3]
-            parked.add(os.path.basename(base.rstrip(os.sep)))
     # Slash commands can be overridden by name too — project AND user-global. A command in a
     # subdirectory is namespaced with a colon: ~/.claude/commands/ns/analyze.md is "ns:analyze".
     for root in (CLAUDE, home_claude):
@@ -216,19 +211,20 @@ def check_skill_overrides() -> str:
         parked |= {os.path.basename(d.rstrip(os.sep)) for d in glob.glob(os.path.join(home_claude, pat, "*", ""))}
 
     dead, present_off = [], []
+    # Documented values: "on", "name-only", "user-invocable-only", "off".
     for k, v in ov.items():
-        if v != "off":
-            continue
         if k in local:
-            present_off.append(k)
+            if v == "off":
+                present_off.append(k)
         elif k not in parked:
             dead.append(k)
     if dead:
-        add("P3", "config", f"{len(dead)} skillOverrides entries match no skill or command on disk "
-                            "— local, plugin, or parked. Verify against an installed plugin before deleting: "
-                            "an override is the only thing holding a plugin skill OFF", ", ".join(sorted(dead)))
+        add("P3", "overrides", f"{len(dead)} skillOverrides entries match no skill or command on disk "
+                            "— project, user-global or parked. Plugin skills ignore skillOverrides "
+                            "(use /plugin), so an entry naming only a plugin skill does nothing",
+            ", ".join(sorted(dead)))
     if present_off:
-        add("P2", "config", f"{len(present_off)} skills live in .claude/skills/ but are forced off — "
+        add("P2", "overrides", f"{len(present_off)} skills live in .claude/skills/ but are forced off — "
                             "they still cost disk + drift, and the folder says 'active'", ", ".join(sorted(present_off)))
     return f"{len(ov)} overrides: {len(dead)} dead, {len(present_off)} present-but-off"
 
@@ -238,7 +234,7 @@ def check_name_collisions() -> str:
     skills = {os.path.basename(p.rstrip(os.sep)) for p in glob.glob(os.path.join(CLAUDE, "skills", "*", ""))}
     clash = sorted(cmds & skills)
     for c in clash:
-        add("P2", "collision", f"'{c}' exists as BOTH a command and a skill — one of them is shadowed",
+        add("P2", "collisions", f"'{c}' exists as BOTH a command and a skill — one of them is shadowed",
             f".claude/commands/{c}.md  vs  .claude/skills/{c}/")
     for vdir in CFG["vendored_skill_dirs"]:
         vendored = os.path.join(ROOT, vdir)
@@ -246,7 +242,7 @@ def check_name_collisions() -> str:
             vnames = {os.path.basename(p.rstrip(os.sep)) for p in glob.glob(os.path.join(vendored, "*", ""))}
             vclash = sorted(vnames & skills)
             if vclash:
-                add("P3", "collision", f"{len(vclash)} vendored skill names in {vdir} collide with live skills",
+                add("P3", "collisions", f"{len(vclash)} vendored skill names in {vdir} collide with live skills",
                     ", ".join(vclash))
     return f"{len(clash)} command/skill collisions"
 
@@ -285,7 +281,7 @@ def check_agents_mirror() -> str:
 def check_broken_paths() -> str:
     pat = re.compile(r"`([A-Za-z0-9_./*-]+)`")
     # A path a doc names in order to FORBID it is not a dead reference — it is the warning
-    # working ("never deploy from apps/old-site-export/"). Same idea as the retired caveat.
+    # working ("never deploy from apps/example-old-export/"). Same idea as the retired caveat.
     gone = re.compile(r"retir\w*|dead|deleted|deletion|removed|archived|disabled|deprecat|binned|"
                       r"killed|dropped|purged|stale|gone|gitignored|gitignore|dockerignore|"
                       r"no longer|not exist|does ?n.t exist|never existed|missing|"
@@ -315,34 +311,33 @@ def check_broken_paths() -> str:
             miss[p].add(m)
     total = sum(len(v) for v in miss.values())
     for p in sorted(miss):
-        add("P2", "broken-path", f"{len(miss[p])} repo-root paths referenced here do not exist",
+        add("P2", "paths", f"{len(miss[p])} repo-root paths referenced here do not exist",
             f"{rel(p)}: " + ", ".join(sorted(miss[p])))
     return f"{total} broken repo-root path refs across {len(miss)} live files"
 
 
 def load_retired() -> list[dict] | None:
-    for name in (CFG["retired_file"], "retired.example.json"):
-        path = name if os.path.isabs(name) else os.path.join(SKILL_DIR, name)
-        if os.path.isfile(path):
-            try:
-                ents = json.loads(read(path))["entities"]
-            except (json.JSONDecodeError, KeyError, TypeError):
-                add("P1", "retired", f"{os.path.basename(path)} is malformed — the retirement sweep cannot run", path)
-                return None
-            if name == "retired.example.json":
-                add("P3", "retired", "using retired.example.json (fictional entries) — "
-                                     "copy it to retired.json and list YOUR retired things", rel(path))
-            return list(ents)
-    add("P2", "retired", "no retired.json — the retirement sweep has nothing to check against",
-        os.path.join(SKILL_DIR, "retired.json"))
-    return None
+    """Entities from the real retired file: [] when it does not exist, None when malformed.
+
+    Never falls back to retired.example.json: its fictional rows would flag ordinary words
+    on a fresh install and fail the run.
+    """
+    name = CFG["retired_file"]
+    path = name if os.path.isabs(name) else os.path.join(SKILL_DIR, name)
+    if not os.path.isfile(path):
+        return []
+    try:
+        return list(json.loads(read(path))["entities"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        add("P1", "retired", f"{os.path.basename(path)} is malformed — the retirement sweep cannot run", path)
+        return None
 
 
 def check_retired_entities() -> str:
     """Flag live instruction files that mention a retired thing with no retirement caveat."""
     entities = load_retired()
     if entities is None:
-        return "SKIPPED"
+        return "SKIPPED (retired file malformed)"
 
     # Archived apps are derived from disk, not hand-listed, so this half never goes stale.
     # Docs rarely write the archive directory name — they write the short app name — so
@@ -359,6 +354,8 @@ def check_retired_entities() -> str:
             short = name[len(prefix):] if prefix and name.startswith(prefix) else name
             if short != name and short.lower() not in generic:
                 entities.append({"pattern": r"\b" + re.escape(short) + r"\b", "why": "archived app"})
+    if not entities:
+        return f"SKIPPED (no {CFG['retired_file']} and no archived app dirs — copy retired.example.json to enable)"
 
     ack = re.compile(r"retir\w*|dead|deleted|removed|archived|disabled|deprecat|binned|killed|dropped|"
                      r"no longer|do NOT|don't use|never use|cancell?ed|decommission\w*|supersed\w+|"
@@ -431,7 +428,7 @@ def check_skill_size() -> str:
     return f"{len(over)} SKILL.md files over the 2500-word context budget"
 
 
-# Frontmatter keys Claude Code reads (code.claude.com/docs/en/skills). Anything else is
+# Frontmatter keys Claude Code reads (code.claude.com/docs/en/skills, checked 2026-10). Anything else is
 # silently ignored — e.g. an `args:` key never produces an autocomplete hint; the
 # supported key is `argument-hint:`. Commands accept the same set except name and paths.
 # When Anthropic adds a key, add it here — otherwise every use of it is a false P2.
@@ -439,7 +436,7 @@ SKILL_KEYS = {
     "name", "description", "when_to_use", "argument-hint", "arguments",
     "disable-model-invocation", "user-invocable", "allowed-tools", "disallowed-tools",
     "model", "effort", "context", "agent", "background", "hooks", "paths", "shell",
-    "metadata", "license", "compatibility", "version",
+    "metadata", "license", "compatibility",
 }
 COMMAND_KEYS = SKILL_KEYS - {"name", "paths"}
 # Agent Skills spec (platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices):

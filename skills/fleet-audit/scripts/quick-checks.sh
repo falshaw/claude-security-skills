@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fleet-audit quick diagnostic checks — READ-ONLY.
 #
-#   bash skills/fleet-audit/scripts/quick-checks.sh [--config fleet.config.json] [--no-net] [--root <repo-root>]
+#   bash .claude/skills/fleet-audit/scripts/quick-checks.sh [--config fleet.config.json] [--no-net] [--root <repo-root>]
 #
 # It never installs, builds, restarts, writes into app dirs, or pushes anything.
 # Inputs come from the config file (see fleet.config.example.json) and these env vars:
@@ -25,12 +25,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+# Resolve the helper dir BEFORE cd, so a relative invocation with --root still finds them.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT" || exit 2
 [ -z "$CONFIG" ] && [ -f fleet.config.json ] && CONFIG=fleet.config.json
 
 PY="${PYTHON:-}"
 if [ -z "$PY" ]; then command -v python3 >/dev/null 2>&1 && PY=python3 || PY=python; fi
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 cfg() {  # cfg <dotted.key.path> <default>   (plain key lookup — no code evaluation)
   if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then
@@ -189,8 +190,10 @@ if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then
   "$PY" - <<'PY'
 import json, os
 c = json.load(open(os.environ["CONFIG"], encoding="utf-8")).get("shared_auth_core")
-if not c:
+if not c or not c.get("enabled", True):
     print("not configured")
+elif not os.path.isfile(c.get("source", "")):
+    print("shared_auth_core.source not found: %r -> check skipped (fix the path or set enabled: false)" % c.get("source"))
 else:
     src = open(c["source"], encoding="utf-8").read().splitlines()
     skip = int(c.get("header_lines_ignored", 0))

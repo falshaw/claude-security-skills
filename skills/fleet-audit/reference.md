@@ -231,7 +231,7 @@ curl -s -X POST https://api.osv.dev/v1/query -H 'Content-Type: application/json'
   -d '{"package":{"name":"next","ecosystem":"npm"},"version":"16.0.0"}'
 
 # Every Python pin in one pass (never a curated subset)
-python skills/fleet-audit/scripts/osv-pins.py apps/
+python .claude/skills/fleet-audit/scripts/osv-pins.py apps/
 
 # Latest-version lookups
 npm view <pkg> version
@@ -289,7 +289,7 @@ package hoisted it breaks the build the moment that package moves — e.g. remov
 breaks the production build because a component imported `date-fns`, which was only ever a transitive.
 
 ```bash
-python skills/fleet-audit/scripts/undeclared-imports.py apps/*    # exit 1 on findings
+python .claude/skills/fleet-audit/scripts/undeclared-imports.py apps/*    # exit 1 on findings
 ```
 
 The scanner resolves each file to its **nearest** `package.json`, validates names against npm rules,
@@ -338,7 +338,7 @@ for d in <dirs>; do
 done
 
 # 3. Confirm the NEW image is what runs (not just what is in the file)
-docker ps --format '{{.Name}}\t{{.Image}}\t{{.Status}}' | sort
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | sort
 for c in $(docker ps --format '{{.Names}}'); do
   [ "$(docker inspect $c -f '{{.Image}}')" = "$(docker image inspect $(docker inspect $c -f '{{.Config.Image}}') -f '{{.Id}}')" ] || echo "STALE $c"
 done

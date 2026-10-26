@@ -103,14 +103,16 @@ would report each protected file as P0. The doctor detects the missing work tree
 to a minimal `.gitignore` evaluation (exact paths, globs, dir prefixes, `!` negation). "Tracked" is
 impossible without a repo.
 
-### `overrides` — an override is the only thing holding a plugin skill OFF
+### `overrides` — check every scope before deleting
 
 **Read this before deleting any override.** "Dead" means the name matches no skill or command on
 disk, and that must be checked in several places: `.claude/skills/`, the parking lots,
-`.claude/commands/`, `~/.claude/commands/` (user-global — `ns/analyze.md` is the key `ns:analyze`),
-`~/.claude/plugins/**/skills|commands`, and `~/.claude/skills-archive*/`. Miss any of them and
-legitimate entries look dead. Deleting "dead" overrides that were really holding plugin skills off
-silently switches all of those skills back **on**.
+`.claude/commands/`, `~/.claude/skills/`, `~/.claude/commands/` (user-global — `ns/analyze.md` is
+the key `ns:analyze`) and `~/.claude/skills-archive*/`. Miss any of them and legitimate entries look
+dead; deleting one switches a user-global skill back **on**. Plugin skills are not affected by
+`skillOverrides` at all (manage them through `/plugin`), so an entry naming only a plugin skill is
+dead config. Documented values: `on`, `name-only`, `user-invocable-only`, `off`
+([code.claude.com/docs/en/skills](https://code.claude.com/docs/en/skills)).
 
 ### `ports` — shared services do not live in `apps/`
 
@@ -208,16 +210,14 @@ Three bugs were hiding real findings:
 
 Fixing those three took `retired` from a reported 0 to dozens of real findings.
 
-**The mistake worth remembering:** acting on "N dead skillOverrides" deleted them — and switched
-dozens of installed plugin skills back ON, because the check only looked in `.claude/skills/`. The
-settings file was restored from a backup taken before the edit. After teaching the check about
-user-global commands, plugin dirs and user-global parking lots, the real dead count was zero: every
-override was load-bearing. Hence: *verify against installed plugins before deleting*, and *back up
-settings before editing them*.
+**Dead-looking overrides can be load-bearing.** An override that names no skill in
+`.claude/skills/` may be the only thing keeping a user-global skill or command off. Deleting it
+switches that skill back ON. Before removing any `overrides` hit, check user-global skills,
+commands and parking lots, and *back up settings before editing them*.
 
-**A retired row must name the dead thing, not the category.** A row retiring a model *runtime*
-(when only its *container* had died) fired on every rule that correctly described the runtime's new
-host install — including the rule that introduced it. Narrow the pattern to the container name.
+**A retired row must name the dead thing, not the category.** If only a service's *container* was
+removed but the service itself still runs elsewhere (say, on the host), a row matching the service
+name fires on every rule that correctly describes the new install. Match the container name instead.
 
 **Verify a new check with controls.** For the `spec` check:
 - positive control: a planted skill with an uppercase/underscore name containing "claude", an

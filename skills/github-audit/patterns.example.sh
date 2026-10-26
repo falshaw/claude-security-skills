@@ -11,7 +11,8 @@
 # and never commit or push that file.
 #
 # Source at run time:  source .claude/skills/github-audit/patterns.local.sh
-# Every variable is a POSIX extended-regex alternation (use with grep -iE / rg -iE).
+# Every variable is a POSIX extended-regex alternation (use with grep -iE / git grep -iE / rg -i -e;
+# in ripgrep -E is --encoding, not extended regex).
 
 # --- Banned terms: anything that must never appear in a repo (context + identifiers) ---
 BANNED='Exampleville|Fictional Holdings|FH-000000|ACME-REG-12345|example-old-company\.test|Northshire'

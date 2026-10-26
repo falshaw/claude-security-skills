@@ -23,6 +23,7 @@ Security and hygiene audit skills for [Claude Code](https://claude.com/claude-co
 ## Install
 
 ```bash
+mkdir -p <your-project>/.claude/skills <your-project>/.claude/agents
 cp -r skills/* <your-project>/.claude/skills/
 cp agents/*    <your-project>/.claude/agents/
 ```
@@ -41,13 +42,20 @@ Then copy each `*.example.*` config/pattern file to its local name and edit it. 
 
 | Tool | Used by |
 | --- | --- |
-| `bash`, `curl`, `jq` | all shell scripts, pii-leak-sweep |
+| `bash`, `curl`, `git` | all shell scripts and audits; `curl` 7.71+ for pii-leak-sweep (`--retry-all-errors`) |
+| bash 4+, GNU `grep`, GNU `sed` | pii-leak-sweep `sweep.sh` (associative arrays, `
+` in sed replacements) |
 | `python3` | fleet-audit helpers, tooling-doctor |
+| `rg` (ripgrep) | app-audit, github-audit secret/term greps |
 | `docker` (+ Compose v2) | docker-audit, fleet-audit, app-audit |
 | `node` / `npm` | app-update, app-audit, fleet-audit (Node apps) |
+| `pip-audit` | app-update, docker-audit (Python apps) |
 | `gh` (authenticated) | github-audit |
+| `uvx` (from `uv`) | github-audit, to run `zizmor` without installing it |
 | `trivy` or `grype` | docker-audit image scans (optional, recommended) |
 | `gitleaks` / `trufflehog`, `zizmor` | github-audit secret + workflow scans (optional) |
+
+**macOS:** the stock bash 3.2 and BSD `grep`/`sed` break `sweep.sh`. Install the GNU tools (`brew install bash grep gnu-sed`) and put them first on `PATH` (Homebrew installs GNU grep/sed as `ggrep`/`gsed`; add their `gnubin` directories to `PATH`). Linux and Git Bash on Windows work as is.
 
 Secrets such as `GH_TOKEN` are read from environment variables only. Nothing is hardcoded.
 
@@ -56,7 +64,7 @@ Secrets such as `GH_TOKEN` are read from environment variables only. Nothing is 
 - **Audits are read-only.** They report findings and fixes; they change nothing unless you explicitly ask.
 - **Never auto-push, auto-deploy or auto-delete.** `app-update` asks before any major bump. Destructive GitHub actions (delete repo, history rewrite) are written out as scripts for you to review and run.
 - Only audit systems you own or are authorized to test.
-- Keep `patterns.local.*`, `.env` and `reports/` out of version control. The provided `.gitignore` covers them.
+- Keep `patterns.local.*`, the local config files above, `.env` and `reports/` out of version control. The provided `.gitignore` covers them.
 
 ## License
 

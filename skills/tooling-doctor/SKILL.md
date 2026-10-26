@@ -35,7 +35,8 @@ audited went stale in the first place. Quote the script's output.
 | `retired.json` | your retired apps / services / MCP servers / hosts — copy `retired.example.json` |
 | `doctor.config.json` | repo layout: archive globs, app-name prefix, ports doc, compose globs, count targets — copy `doctor.config.example.json` |
 
-Without them the doctor runs on defaults and says so (P3). Archived app directories are picked
+Without them the doctor runs on defaults. Without `retired.json` the `retired` check covers only
+archived app directories, and is skipped when there are none (it never reads the example file). Archived app directories are picked
 up from disk automatically (`archived_app_globs`), so never list them in `retired.json`.
 
 ## Modes
@@ -94,8 +95,8 @@ Work top-down; each step is safe to stop after.
    from another doc. `scripts/gen_ports.py` rewrites the generated block of the ports doc.
 5. **`paths`** — read `reference.md` first; app-relative paths are a known false positive.
 6. **`mirror`** — copy `.claude/skills/<n>/` → `.agents/skills/<n>/`. Never hand-edit the mirror.
-7. **`overrides`** — delete dead entries **only after** confirming no installed plugin provides the
-   name. For present-but-off skills, pick one: move the folder to `skills-disabled/` **or** drop the
+7. **`overrides`** — delete dead entries **only after** confirming no user-global skill or command
+   has the name (plugin skills ignore `skillOverrides`; manage them with `/plugin`). For present-but-off skills, pick one: move the folder to `skills-disabled/` **or** drop the
    override.
 8. **`size`** — split the body into `reference.md`; keep triggers, the decision table and the prime
    directive in `SKILL.md`.

@@ -41,10 +41,11 @@
     "_comment": "Set from the vendor security page / OSV, never from memory. 0.0.0 disables the check."
   },
   "shared_auth_core": {
+    "enabled": false,
     "source": "packages/auth/auth-core.ts",
     "copies": ["src/lib/auth-core.ts"],
     "header_lines_ignored": 3,
-    "_comment": "Optional. If apps vendor a shared auth file, quick-checks diffs each copy against the source."
+    "_comment": "Optional, off by default. If apps vendor a shared auth file, set enabled: true and quick-checks diffs each copy against the source."
   },
   "accepted_risks": [
     {

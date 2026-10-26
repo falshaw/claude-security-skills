@@ -1,12 +1,10 @@
 {
-  "_comment": "EXAMPLE — fictional entries. Copy to retired.json and list things that are RETIRED/DEAD but that tooling docs might still describe as live. Archived app directories are derived from disk (archived_app_globs in doctor.config.json) and must NOT be listed here. Add a row the day you retire something — that is the whole maintenance cost of this check. A row names the thing that died (the container, the server), never the whole category (the runtime) — otherwise every correct mention of the live replacement fires.",
+  "_comment": "EXAMPLE — generic placeholder entries. Copy to retired.json and list things that are RETIRED/DEAD but that tooling docs might still describe as live. Archived app directories are derived from disk (archived_app_globs in doctor.config.json) and must NOT be listed here. Add a row the day you retire something — that is the whole maintenance cost of this check. A row names the thing that died (the container, the server), never the whole category (the runtime) — otherwise every correct mention of the live replacement fires.",
   "entities": [
-    { "pattern": "legacy-llm-container|shared-llm-container", "why": "the shared LLM container was retired; the model server now runs natively on the host — plain mentions of the runtime are live and must not be flagged" },
-    { "pattern": "\\bworkflow-engine-x\\b",  "why": "automation engine deleted; jobs moved to scheduled scripts" },
-    { "pattern": "old-site-export",          "why": "static export tree deleted — it once shipped the wrong design over the live site; deploy only from the canonical source tree" },
-    { "pattern": "203\\.0\\.113\\.10",        "why": "VPS decommissioned (documentation IP range) — do not SSH" },
-    { "pattern": "\\bwordpress\\b",          "why": "no WordPress anywhere any more — all sites are static" },
-    { "pattern": "mcp__legacy_db|legacy-db MCP", "why": "MCP server disabled — query the database directly instead" },
-    { "pattern": "\\bsearch-mcp-x\\b",        "why": "MCP server disabled — its server instructions carried a prompt-injection payload" }
+    { "pattern": "\\bexample-cache-container\\b", "why": "example: cache container removed; the service now runs elsewhere, so plain mentions of the service stay live" },
+    { "pattern": "\\bexample-scheduler\\b",       "why": "example: job scheduler removed; jobs moved to another runner" },
+    { "pattern": "\\bexample-old-export\\b",      "why": "example: old build-output tree deleted; deploy only from the canonical source" },
+    { "pattern": "198\\.51\\.100\\.20",            "why": "example: server decommissioned (documentation IP range)" },
+    { "pattern": "\\bexample-legacy-mcp\\b",      "why": "example: MCP server disabled" }
   ]
 }

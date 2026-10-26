@@ -1,6 +1,6 @@
 ---
 name: app-update
-description: Safely fixes npm/pip security advisories and updates dependencies for ONE app directory without breaking it. Separates non-breaking in-range patches (auto-apply) from breaking major bumps (ASK-FIRST, refactor + verify), uses verified npm overrides for stuck transitive dependencies, checks vendor security releases that npm audit / OSV may not carry yet, and proves the app still typechecks, builds and boots. Covers Electron, Next.js + Prisma, and Python apps. Use when the user says "update the app", "fix the vulnerabilities", "npm audit", "bump dependencies", "update deps", "upgrade <app>", "patch Next.js", or pastes npm audit / npm outdated / pip output for an app.
+description: Safely fixes npm/pip security advisories and updates dependencies for ONE app directory without breaking it. Separates non-breaking in-range patches (auto-apply) from breaking major bumps (ASK-FIRST, refactor + verify), uses verified npm overrides for stuck transitive dependencies, checks vendor security releases that npm audit / OSV may not carry yet, and proves the app still typechecks, builds and boots. Covers Electron, Next.js + Prisma, and Python apps. Use when the user says "update the app", "fix the vulnerabilities", "npm audit", "bump dependencies", "update deps", "upgrade [app]", "patch Next.js", or pastes npm audit / npm outdated / pip output for an app.
 ---
 
 # App Dependency Update & Vulnerability Fix

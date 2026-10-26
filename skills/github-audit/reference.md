@@ -99,6 +99,7 @@ history). Code search is a cross-check only — it is default-branch-only and it
 incomplete and laggy.
 
 ```bash
+# Private repos: run `gh auth setup-git` once so these clones use the gh token.
 # Tip of every pushed branch
 R="$(mktemp -d)/REPO"
 git clone --quiet --no-single-branch "https://github.com/$OWNER/REPO.git" "$R"

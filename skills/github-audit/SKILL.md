@@ -98,18 +98,25 @@ deliberate copyright footer is the documented exception). **P1:** 2.4 Postman co
 
 Never inline terms here — they come from the pattern file.
 
-**Primary method = scratch clone of the pushed branches + `rg --hidden`.** GitHub code search is a
+**Primary method = scratch clone of the pushed branches + `git grep` per branch.** GitHub code search is a
 best-effort cross-check only: it indexes the default branch only, lags on private repos, and has returned
 `0` for identifiers a local grep found dozens of times.
 
 ```bash
 R="$(mktemp -d)/gh-audit-REPO"
-git clone --quiet --no-single-branch --depth 1 "https://github.com/$OWNER/REPO.git" "$R"   # read-only
-rg --hidden -inE "$BANNED" "$R" | { [ -n "$EXCLUDE" ] && grep -viE "$EXCLUDE" || cat; } > "$R.hits"
+# --no-single-branch + --depth 1 = the tip of EVERY pushed branch, no history (read-only).
+# Private repo: run `gh auth setup-git` once first so git uses the gh token for the clone.
+git clone --quiet --no-single-branch --depth 1 "https://github.com/$OWNER/REPO.git" "$R"
+BRANCHES=$(git -C "$R" branch -r | grep -v HEAD)
+for b in $BRANCHES; do git -C "$R" grep -inE "$BANNED" "$b" -- .; done   | { [ -n "$EXCLUDE" ] && grep -viE "$EXCLUDE" || cat; } > "$R.hits"
 wc -l < "$R.hits"
-rg --hidden -inE "$HIGH_SIGNAL" "$R"    # the real P0 signal
+for b in $BRANCHES; do git -C "$R" grep -inE "$HIGH_SIGNAL" "$b" -- .; done   # the real P0 signal
 rm -rf "$R" "$R.hits"
 ```
+
+`git grep` on each remote branch covers dotfiles and every branch tip. The working tree holds only the
+default branch, so `rg --hidden -in -e "$BANNED" "$R"` is a quick look at that branch alone (in ripgrep
+`-E` means `--encoding`, not extended regex; its default syntax already handles `|` alternation).
 
 Grade on `$HIGH_SIGNAL` (unambiguous identifiers). Common country/city words appear legitimately in i18n
 lists, training data and marketing copy — they inflate the raw count without being a personal leak.
